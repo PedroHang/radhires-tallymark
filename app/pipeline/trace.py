@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import os
 import platform
 import re
 import subprocess
@@ -248,7 +249,7 @@ _GIT: dict | None = None
 def _git_info() -> dict:
     global _GIT
     if _GIT is None:
-        _GIT = {"commit": None, "dirty": None}
+        _GIT = {"commit": (os.environ.get("VERCEL_GIT_COMMIT_SHA") or "")[:7] or None, "dirty": None}
         try:
             out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
                                  text=True, timeout=3)

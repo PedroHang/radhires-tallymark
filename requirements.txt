@@ -13,4 +13,5 @@ python-multipart==0.0.32
 RapidFuzz==3.14.6
 rapidocr-onnxruntime==1.4.4
 uvicorn[standard]==0.53.0
+vercel-blob==0.5.0
 pytest==9.1.1

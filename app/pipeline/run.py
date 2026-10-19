@@ -166,12 +166,14 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         wpath = cache / f"sheet_{n}_work.png"
         vpath = cache / f"sheet_{n}_view.png"
         try:
-            if wpath.exists() and vpath.exists():
+            if store.materialize(wpath) and store.materialize(vpath):
                 work[n] = cv2.imread(str(wpath))[:, :, ::-1].copy()
             else:
                 img = render_page(doc[n - 1], WORK_DPI)
                 cv2.imwrite(str(wpath), img[:, :, ::-1])
                 cv2.imwrite(str(vpath), render_page(doc[n - 1], VIEW_DPI)[:, :, ::-1])
+                store.persist(wpath)
+                store.persist(vpath)
                 work[n] = img
         except Exception as exc:  # noqa: BLE001
             raise StageError("render", n, f"Sheet {n} could not be rendered ({exc}).") from exc
@@ -197,7 +199,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
     for n in sheets:
         rpath = cache / f"sheet_{n}_regions.json"
         ts = time.perf_counter()
-        if rpath.exists():
+        if store.materialize(rpath):
             regions += [Region.from_dict(r) for r in json.loads(rpath.read_text(encoding="utf-8"))]
             ocr_sheets.append(_sheet_read(n, True, ts, [r for r in regions if r.sheet == n]))
             continue
@@ -208,7 +210,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             )
         except Exception as exc:  # noqa: BLE001
             raise StageError("text_regions", n, f"The page may be a low-resolution scan ({exc}).") from exc
-        rpath.write_text(json.dumps([r.to_dict() for r in sheet_regions]), encoding="utf-8")
+        store.write_file(rpath, json.dumps([r.to_dict() for r in sheet_regions]))
         regions += sheet_regions
         ocr_sheets.append(_sheet_read(n, False, ts, sheet_regions))
     _stage(run_id, "text_regions", "done", count=f"{len(regions)} found", ms=_ms(t0))
@@ -489,7 +491,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             "excluded": [{"poly": r.to_dict()["poly"], "bbox": r.bbox.to_dict(), "text": r.text,
                           "rule": r.excluded_by} for r in regions if r.sheet == n and r.excluded_by],
         }
-    (rdir / "coverage.json").write_text(json.dumps(overlay), encoding="utf-8")
+    store.write_file(rdir / "coverage.json", json.dumps(overlay))
 
     trace_ref = {"available": False}
     try:

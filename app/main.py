@@ -12,9 +12,10 @@ import uuid
 from pathlib import Path
 
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from . import store
@@ -35,6 +36,18 @@ MAX_BYTES = 50 * 1024 * 1024
 MAX_SHEETS = 20
 
 app = FastAPI(title="Tallymark", version="1.0")
+
+
+def sync_runs() -> bool:
+    """On Vercel (or with TALLYMARK_SYNC=1) a run executes inside the POST /runs request, because a
+    serverless function may not keep working after it has sent its response."""
+    return bool(os.environ.get("VERCEL")) or os.environ.get("TALLYMARK_SYNC") == "1"
+
+
+EXPIRED = ("This run's files are no longer on the server (on this deployment results are kept only for a short "
+           "time). Run the check again.")
+UPLOAD_EXPIRED = "That uploaded file is no longer on the server. Load the file again."
+SAMPLE_FILES = {"drawing": "nist_ftc_06_asme1_rd.pdf", "boc": "ftc06_boc_simulated.csv"}
 
 # Keys live in server memory (or .env / environment), one per provider. They are never written to run docs.
 _settings = {"provider": DEFAULT_PROVIDER,
@@ -101,24 +114,34 @@ async def upload(file: UploadFile = File(...), kind: str = Form(...)):
     return {**meta, **info}
 
 
+def _sample_upload_id(kind: str) -> str:
+    """Stable id per bundled sample file, so any server instance can recreate it from the repo."""
+    return f"up_sample_{kind}_{store.sha256((SAMPLES / SAMPLE_FILES[kind]).read_bytes())[:10]}"
+
+
+def _load_upload(upload_id: str) -> tuple[bytes, dict]:
+    for kind in SAMPLE_FILES:
+        if upload_id == _sample_upload_id(kind):
+            try:
+                return store.load_upload(upload_id)
+            except store.UploadMissing:
+                fname = SAMPLE_FILES[kind]
+                store.save_upload((SAMPLES / fname).read_bytes(), fname, kind, upload_id=upload_id)
+    try:
+        return store.load_upload(upload_id)
+    except store.UploadMissing:
+        raise HTTPException(410, UPLOAD_EXPIRED)
+
+
 @app.get("/samples")
 def samples():
-    """Bundled sample: public NIST FTC-06 drawing + simulated BoC (uploaded on first request)."""
-    marker = store.UPLOADS / "samples.json"
-    if marker.exists():
-        ids = json.loads(marker.read_text(encoding="utf-8"))
-        if all((store.UPLOADS / i).exists() for i in ids.values()):
-            return _sample_payload(ids)
-    ids = {}
-    for kind, fname in (("drawing", "nist_ftc_06_asme1_rd.pdf"), ("boc", "ftc06_boc_simulated.csv")):
-        ids[kind] = store.save_upload((SAMPLES / fname).read_bytes(), fname, kind)["upload_id"]
-    marker.write_text(json.dumps(ids), encoding="utf-8")
-    return _sample_payload(ids)
+    """Bundled sample: public NIST FTC-06 drawing + simulated BoC."""
+    return _sample_payload({kind: _sample_upload_id(kind) for kind in SAMPLE_FILES})
 
 
 def _sample_payload(ids: dict) -> dict:
-    d_bytes, d_meta = store.load_upload(ids["drawing"])
-    b_bytes, b_meta = store.load_upload(ids["boc"])
+    d_bytes, d_meta = _load_upload(ids["drawing"])
+    b_bytes, b_meta = _load_upload(ids["boc"])
     return {
         "drawing": {**d_meta, **_inspect_drawing(d_bytes, d_meta["filename"])},
         "boc": {**b_meta, **_inspect_boc(b_bytes, b_meta["filename"]), "simulated": True},
@@ -129,8 +152,8 @@ def _sample_payload(ids: dict) -> dict:
 @app.post("/precheck")
 def precheck(body: dict):
     """Non-blocking schema warnings before a run (sheets with no BoC rows)."""
-    d_bytes, d_meta = store.load_upload(body["drawing_upload_id"])
-    b_bytes, b_meta = store.load_upload(body["boc_upload_id"])
+    d_bytes, d_meta = _load_upload(body["drawing_upload_id"])
+    b_bytes, b_meta = _load_upload(body["boc_upload_id"])
     sheets = _inspect_drawing(d_bytes, d_meta["filename"])["sheets"]
     boc = _inspect_boc(b_bytes, b_meta["filename"])
     empty = [n for n in range(1, sheets + 1) if n not in boc["sheets"]]
@@ -192,11 +215,23 @@ def put_settings(body: SettingsIn):
 
 
 @app.post("/settings/test")
-def test_credential():
-    """One tiny request to confirm the key works with the selected provider and model."""
-    p = _settings["provider"]
-    ok, message = ping(p, _settings["credentials"][p], _settings["models"][p])
+def test_credential(x_tallymark_key: str | None = Header(None), x_tallymark_provider: str | None = Header(None),
+                    x_tallymark_model: str | None = Header(None)):
+    """One tiny request to confirm the key works with the selected provider and model.
+    A key sent in X-Tallymark-Key is used for this request only and never stored."""
+    p, cred, model = _request_llm(x_tallymark_key, x_tallymark_provider, x_tallymark_model)
+    ok, message = ping(p, cred, model)
     return {"ok": ok, "message": message}
+
+
+def _request_llm(key: str | None, provider: str | None, model: str | None) -> tuple[str, str | None, str]:
+    """Provider, credential and model for one request. Header values (sent by a browser that keeps the
+    key itself, as on a serverless deployment) win over the server's in-memory settings, and are never
+    stored or logged."""
+    key = (key or "").strip() or None
+    p = provider if provider in PROVIDERS else ((detect_provider(key) if key else None) or _settings["provider"])
+    cred = key or _settings["credentials"][p]
+    return p, cred, (model or _settings["models"][p])
 
 
 # --------------------------------------------------------------------------- runs
@@ -211,13 +246,16 @@ async def create_run(
     use_llm: bool = Form(True),
     skip_sheets: str | None = Form(None),
     simulated: bool | None = Form(None),
+    x_tallymark_key: str | None = Header(None),
+    x_tallymark_provider: str | None = Header(None),
+    x_tallymark_model: str | None = Header(None),
 ):
     if drawing is not None:
         d_bytes = await drawing.read()
         _inspect_drawing(d_bytes, drawing.filename or "")
         d_meta = store.save_upload(d_bytes, drawing.filename or "drawing.pdf", "drawing")
     elif drawing_upload_id:
-        d_bytes, d_meta = store.load_upload(drawing_upload_id)
+        d_bytes, d_meta = _load_upload(drawing_upload_id)
     else:
         raise HTTPException(422, "Load a drawing and a BoC first.")
     if boc is not None:
@@ -225,33 +263,43 @@ async def create_run(
         _inspect_boc(b_bytes, boc.filename or "")
         b_meta = store.save_upload(b_bytes, boc.filename or "boc.csv", "boc")
     elif boc_upload_id:
-        b_bytes, b_meta = store.load_upload(boc_upload_id)
+        b_bytes, b_meta = _load_upload(boc_upload_id)
     else:
         raise HTTPException(422, "Load a drawing and a BoC first.")
 
+    llm_provider, llm_cred, llm_model = _request_llm(x_tallymark_key, x_tallymark_provider, x_tallymark_model)
     opts = RunOptions(
         exclusions=json.loads(exclusions) if exclusions else list(DEFAULT_EXCLUSIONS),
         extra_regex=extra_regex or None,
         use_llm=use_llm,
-        model=_settings["models"][_settings["provider"]],
-        provider=_settings["provider"],
-        credential=_settings["credentials"][_settings["provider"]],
+        model=llm_model,
+        provider=llm_provider,
+        credential=llm_cred,
         skip_sheets=json.loads(skip_sheets) if skip_sheets else [],
         simulated=simulated if simulated is not None else "simulated" in b_meta["filename"].lower(),
     )
     run_id = f"run_{dt.datetime.now().strftime('%Y-%m-%d')}_{uuid.uuid4().hex[:6]}"
     doc = new_run_doc(run_id, _now(), d_meta, b_meta, opts)
     store.put_run(doc)
-    threading.Thread(target=execute, args=(run_id, d_bytes, d_meta["filename"], b_bytes, b_meta["filename"], opts),
-                     daemon=True).start()
-    return {"run_id": run_id}
+    args = (run_id, d_bytes, d_meta["filename"], b_bytes, b_meta["filename"], opts)
+    if sync_runs():
+        # serverless: finish the whole check inside this request (worker thread keeps the event loop free)
+        await run_in_threadpool(execute, *args)
+        return JSONResponse({"run_id": run_id, "status": "done", "mode": "sync", "run": _run_summary(_run_or_404(run_id))},
+                            status_code=200)
+    threading.Thread(target=execute, args=args, daemon=True).start()
+    return {"run_id": run_id, "status": "queued", "mode": "async"}
 
 
 def _run_or_404(run_id: str) -> dict:
     doc = store.get_run(run_id)
     if doc is None:
-        raise HTTPException(404, "Run not found.")
+        raise HTTPException(404, "Run not found. It may have expired: run the check again.")
     return doc
+
+
+def _run_summary(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k not in ("flags", "rows")} | {"flag_ids": [f["flag_id"] for f in doc["flags"]]}
 
 
 @app.get("/runs")
@@ -261,8 +309,7 @@ def runs():
 
 @app.get("/runs/{run_id}")
 def get_run(run_id: str):
-    doc = _run_or_404(run_id)
-    return {k: v for k, v in doc.items() if k not in ("flags", "rows")} | {"flag_ids": [f["flag_id"] for f in doc["flags"]]}
+    return _run_summary(_run_or_404(run_id))
 
 
 @app.get("/runs/{run_id}/events")
@@ -270,15 +317,23 @@ async def run_events(run_id: str):
     """Server-sent events with stage progress until the run completes or fails."""
     _run_or_404(run_id)
 
+    # In sync mode the run is already finished (or runs on another instance), so send the current
+    # state once and close. Locally, stream until the run ends, with a ceiling so a lost run can't
+    # hold a connection forever.
+    deadline = asyncio.get_running_loop().time() + (0 if sync_runs() else 900)
+
     async def gen():
         last = None
         while True:
-            doc = store.get_run(run_id)
+            doc = await run_in_threadpool(store.get_run, run_id)
+            if doc is None:
+                yield f"data: {json.dumps({'status': 'error', 'stages': [], 'error': {'message': EXPIRED}})}\n\n"
+                break
             payload = json.dumps({"status": doc["status"], "stages": doc["stages"], "error": doc["error"]})
             if payload != last:
                 yield f"data: {payload}\n\n"
                 last = payload
-            if doc["status"] in ("complete", "error"):
+            if doc["status"] in ("complete", "error") or asyncio.get_running_loop().time() >= deadline:
                 break
             await asyncio.sleep(0.15)
 
@@ -333,7 +388,9 @@ def _sheet_path(doc: dict, n: int, kind: str) -> Path:
     if not cache:
         raise HTTPException(404, "Sheet not rendered yet.")
     p = store.CACHE / cache / f"sheet_{n}_{kind}.png"
-    if not p.exists():
+    if not store.materialize(p):
+        if doc["status"] in ("complete", "error"):
+            raise HTTPException(410, EXPIRED)
         raise HTTPException(404, "Sheet not rendered yet.")
     return p
 
@@ -347,9 +404,10 @@ def sheet_png(run_id: str, n: int):
 @app.get("/runs/{run_id}/sheets/{n}/coverage.json")
 def sheet_coverage(run_id: str, n: int):
     doc = _run_or_404(run_id)
-    path = store.run_dir(run_id) / "coverage.json"
-    if not path.exists():
-        raise HTTPException(404, "Coverage not ready.")
+    path = store.run_file(run_id, "coverage.json")
+    if path is None:
+        raise HTTPException(410 if doc["status"] == "complete" else 404,
+                            EXPIRED if doc["status"] == "complete" else "Coverage not ready.")
     overlay = json.loads(path.read_text(encoding="utf-8")).get(str(n), {"covered": [], "excluded": []})
     return {**overlay, "flags": [f for f in doc["flags"] if f["sheet"] == n]}
 
@@ -361,10 +419,11 @@ def flag_crop(run_id: str, flag_id: str):
     if flag is None:
         raise HTTPException(404, "Flag not found.")
     out = store.run_dir(run_id) / f"crop_{flag_id}.png"
-    if not out.exists():
+    if not store.materialize(out):
         work = cv2.imread(str(_sheet_path(doc, flag["sheet"], "work")))[:, :, ::-1].copy()
         im = crop_with_outline(work, [tuple(p) for p in flag["poly"]], Box.from_dict(flag["bbox"]), pad_ratio=0.45)
         im.save(out)
+        store.persist(out)
     return FileResponse(out, media_type="image/png")
 
 
@@ -484,7 +543,7 @@ def delete_run(run_id: str):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "run_mode": "sync" if sync_runs() else "async", "storage": store.storage_status()}
 
 
 @app.exception_handler(HTTPException)

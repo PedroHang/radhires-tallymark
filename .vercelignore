@@ -1,0 +1,16 @@
+# Not needed by the deployed app (see docs/DEPLOY.md). The function bundle limit is 500 MB.
+.venv/
+data/
+scratch/
+eval/
+samples/eval/
+tests/
+tools/
+docs/
+frontend/dev/
+__pycache__/
+*.pyc
+.env
+.env.*
+# dependencies come from pyproject.toml + uv.lock on Vercel; requirements.txt is for local pip installs
+requirements.txt
