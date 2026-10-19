@@ -10,6 +10,8 @@ An AI harness that reads an engineering drawing on its own, greys out everything
 Bill of Characteristics already covers, and lights up only what no row covers.
 The quality engineer checks 4 items instead of hunting through 200.
 
+[![Live demo](https://img.shields.io/badge/Live%20demo-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://radhires-tallymark.vercel.app/)
+&nbsp;
 [![Design document (PDF)](https://img.shields.io/badge/Design%20document-PDF-c62828?style=for-the-badge&logo=adobeacrobatreader&logoColor=white)](docs/Tallymark-Design-Document.pdf)
 &nbsp;
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-2F5D8A?style=for-the-badge&logo=python&logoColor=white)
@@ -17,6 +19,10 @@ The quality engineer checks 4 items instead of hunting through 200.
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 &nbsp;
 ![Claude · GPT · Gemini](https://img.shields.io/badge/Models-Claude%20%C2%B7%20GPT%20%C2%B7%20Gemini-F5B83D?style=for-the-badge)
+
+### [▶ Try it live: radhires-tallymark.vercel.app](https://radhires-tallymark.vercel.app/)
+
+<sub>Click <b>Use sample drawing</b>, then <b>Run check</b>. No key needed; bring your own to switch on the AI check.</sub>
 
 **[📄 Read the 3-page design document](docs/Tallymark-Design-Document.pdf)** ·
 [Quick start](#-quick-start) ·
@@ -154,9 +160,10 @@ visible as low-confidence flags instead of disappearing.
 
 ## 🔌 Model providers
 
-The same prompts and schema run on any of three providers. Paste a key in **Settings → Model check**
-(the provider is detected from the key prefix) or put it in a `.env` file next to this README.
-**Test** sends one tiny request and says plainly whether the key and model work.
+The same prompts and schema run on any of three providers. **Bring your own key:** paste it on the
+start screen or in **Settings** (the provider is detected from the key prefix). **Test** sends one tiny
+request and says plainly whether the key and model work. Whoever runs the server can instead set a
+key in a `.env` file next to this README or in the host's environment variables.
 
 | Provider | Key looks like | Env var | Default model |
 | --- | --- | --- | --- |
@@ -164,8 +171,11 @@ The same prompts and schema run on any of three providers. Paste a key in **Sett
 | OpenAI | `sk-...` | `OPENAI_API_KEY` | `gpt-6.1-sol` |
 | Google Gemini | `AIza...` / `AQ....` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.8-flash` |
 
-`UINK_PROVIDER` / `UINK_MODEL` override the defaults. Keys stay in server memory and are never
-written to run files. Dollar cost is shown only for models with a verified price; others show tokens.
+**Your key stays in your browser tab.** It is sent only with your own checks (`X-Tallymark-Key`), is
+never stored on the server, never written to run files or the audit trail, and is forgotten when the
+tab closes, so one visitor's key can never pay for another visitor's run. `UINK_PROVIDER` /
+`UINK_MODEL` override the defaults. Dollar cost is shown only for models with a verified price;
+others show tokens.
 
 ---
 
@@ -179,6 +189,7 @@ scores the output (`python -m tools.eval` → [`eval/REPORT.md`](eval/REPORT.md)
 | Planted misses found | **100%** (8/8) | **98%** (63/64) |
 | Flags that were real | 100% | 34% |
 | False flags per clean sheet | 0 | 2.78 (0.48 excluding ambiguous items) |
+| *Without coordinates (Form 3 style):* misses found / flags real | 75% / 86% | 94% / 60% |
 
 Honest reading: recall is strong; precision on unseen drawings is the weak spot. Most of that noise
 is garbled stacked tolerances, which is exactly what the model check exists to judge, and that has
@@ -197,11 +208,12 @@ per flag.
 - **Results:** the drawing faded with covered regions grey and gaps lit in red; an **Original** toggle proves nothing was painted over; every flag states its rule and confidence.
 - **Trust what was *not* flagged:** a **Covered** tab lists every region a BoC row accounts for, **Show covered** (<kbd>V</kbd>) outlines them on the drawing with their row number, and **View BoC** (<kbd>B</kbd>) opens the uploaded table with a status per row.
 - **Review:** grouped Confirm / Exclude / Dismiss buttons (<kbd>C</kbd> <kbd>E</kbd> <kbd>D</kbd>), undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>), next/previous (<kbd>J</kbd> <kbd>K</kbd>), per-sheet progress that turns green, exceptions export (<kbd>Ctrl</kbd>+<kbd>E</kbd>).
+- **See every decision:** each flag has a **How was this decided?** timeline (read → matched? → excluded? → rule → AI → score, each step labelled Measured / Rule / AI / Score, with the AI's exact request and raw answer one click away). **Inspect** mode (<kbd>I</kbd>) explains any text on the drawing, including why something was *not* flagged. The **Run report** (<kbd>R</kbd>) shows the full funnel, stage timings, every AI call and a downloadable audit trail. Items the AI drops stay visible under **Dropped by AI**, with **Restore as flag**.
 - **Comfort for long sessions:** guided tour on first run (replay from Help), light theme by default with dark on request, interface size control (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>=</kbd> / <kbd>-</kbd>), resizable side panels, notices you can dismiss.
 
-Plain HTML, CSS and JS in [`frontend/`](frontend), no build step, served by FastAPI. The three
-add-on modules (guided tour, BoC viewer, layout tools) are self-contained files with standalone
-demo pages in [`frontend/dev/`](frontend/dev).
+Plain HTML, CSS and JS in [`frontend/`](frontend), no build step, served by FastAPI. The add-on
+modules (guided tour, BoC viewer, layout tools, decision-trace views) are self-contained files with
+standalone demo pages in [`frontend/dev/`](frontend/dev).
 
 ---
 
@@ -210,9 +222,9 @@ demo pages in [`frontend/dev/`](frontend/dev).
 | Real | Stubbed or simulated |
 | --- | --- |
 | OCR pipeline, frame detection, coverage matching, exclusions, rules, scoring, places check | The BoC export format: real extractors' column layouts aren't public, so the sample uses our own schema (Form 3 sheets are also accepted) |
-| Provider-agnostic model calls with structured outputs and full failure handling | The model check has been verified against live APIs only up to authentication; accuracy with the model on is not yet measured |
+| Provider-agnostic model calls with structured outputs and full failure handling; live Claude calls verified end to end | Accuracy with the model and the investigator on is not yet measured by the eval |
 | Review workflow, dispositions, undo, exceptions CSV export | Drawings are public NIST test parts with **planted** misses, not customer drawings |
-| Eval harness and unit tests | No user accounts; runs and uploads live on local disk |
+| Eval harness, unit tests, a per-run decision trace | No user accounts; on the live demo, runs are kept only briefly |
 
 **Known limits:** it catches what was *left out*, not values that were *misread* (12.5 typed as 125).
 Text the OCR never reads cannot be flagged. It points; the engineer decides and signs.
@@ -221,9 +233,11 @@ Text the OCR never reads cannot be flagged. It points; the engineer decides and 
 
 ## ☁️ Deployment
 
-Runs locally today with one command. Vercel hosting is being prepared: the dependencies fit Vercel's
-Python function limits, and the run model is being adapted for serverless (no background threads
-after the response, shared storage instead of local disk).
+**Live at [radhires-tallymark.vercel.app](https://radhires-tallymark.vercel.app/)** as a single Python
+function on Vercel. On a serverless host each check runs inside one request (no background work after
+the response), files live in `/tmp` with an optional Vercel Blob store for durability, and the bundled
+sample's OCR is precomputed so a demo run finishes in seconds. Step-by-step guide, limits and
+troubleshooting: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ---
 
@@ -247,6 +261,8 @@ after the response, shared storage instead of local disk).
 | GET | `/runs/{id}/exceptions.csv` | Export (`include_dismissed`) |
 | GET/PUT | `/settings`, POST `/settings/test` | Provider, model, key (memory only), connection test |
 | DELETE | `/runs/{id}` | Delete a run and its files |
+| GET | `/runs/{id}/trace`, `/trace/regions[/{rid}]`, `/trace/flags/{fid}`, `/trace/llm/{cid}`, `/audit.json` | Decision trace and audit trail ([`docs/TRACE.md`](docs/TRACE.md)) |
+| POST | `/runs/{id}/trace/regions/{rid}/restore` | Restore an item the AI dropped as an open flag |
 
 </details>
 
