@@ -13,11 +13,11 @@
   })();
 </script>
 <script>(function(){var s=100;try{s=parseInt(localStorage.getItem("tallymark.uiScale"),10)||100}catch(e){}if([85,90,100,110,120,130].indexOf(s)<0)s=100;var d=document.documentElement;d.style.setProperty("--tally-ui-zoom",String(s/100));if(s!==100)d.style.zoom=String(s/100);d.setAttribute("data-ui-scale",String(s));})();</script>
-<link rel="stylesheet" href="app.css?v=7">
-<link rel="stylesheet" href="layout-tools.css?v=7">
-<link rel="stylesheet" href="boc-view.css?v=7">
-<link rel="stylesheet" href="tour.css?v=7">
-<link rel="stylesheet" href="trace-view.css?v=7">
+<link rel="stylesheet" href="app.css?v=8">
+<link rel="stylesheet" href="layout-tools.css?v=8">
+<link rel="stylesheet" href="boc-view.css?v=8">
+<link rel="stylesheet" href="tour.css?v=8">
+<link rel="stylesheet" href="trace-view.css?v=8">
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=7">
 </head>
 <body>
@@ -483,7 +483,7 @@
         <div class="key-status" id="key-status"></div>
       </div>
       <label class="check"><input type="checkbox" id="use-llm" checked> Use the model on ambiguous leftovers</label>
-      <p class="foot-note">Works with an Anthropic, OpenAI or Google Gemini key: paste any of them and the provider is picked from the key. Keys stay in the local server's memory and are never written to run files. Claude Pro/Max subscription tokens (sk-ant-oat...) are meant for Claude Code; the API may reject them here, so a Console API key is the reliable option.</p>
+      <p class="foot-note">Works with an Anthropic, OpenAI or Google Gemini key: paste any of them and the provider is picked from the key. Your key stays in this browser tab (session storage), is sent only with your own checks, and is never stored on the server or written to run files. Closing the tab forgets it. Claude Pro/Max subscription tokens (sk-ant-oat...) are meant for Claude Code; the API may reject them here, so a Console API key is the reliable option.</p>
     </div>
   </div>
 </div>
@@ -498,10 +498,10 @@
   </div>
 </div>
 
-<script src="layout-tools.js?v=7"></script>
-<script src="boc-view.js?v=7"></script>
-<script src="trace-view.js?v=7"></script>
-<script src="app.js?v=7"></script>
-<script src="tour.js?v=7"></script>
+<script src="layout-tools.js?v=8"></script>
+<script src="boc-view.js?v=8"></script>
+<script src="trace-view.js?v=8"></script>
+<script src="app.js?v=8"></script>
+<script src="tour.js?v=8"></script>
 </body>
 </html>

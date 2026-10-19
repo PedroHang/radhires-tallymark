@@ -564,7 +564,7 @@
       "<dt>Exclusions</dt><dd>" + ((s.exclusions || []).length ? s.exclusions.map(function (k) { return chip(esc(label(ctx, "exclusions", k)), ""); }).join(" ") : "none") +
       (s.extra_regex ? ' and pattern <span class="tv-mono">' + esc(s.extra_regex) + "</span>" : "") + "</dd>" +
       "<dt>AI check</dt><dd>" + (s.use_llm ? "On" + (s.provider ? ": " + esc(s.provider) + " · <span class=\"tv-mono\">" + esc(s.model) + "</span>" : "") +
-        (s.credential_source ? " (key from " + esc(s.credential_source === "session" ? "this server's memory" : s.credential_source) + ", never recorded)" : " (no key)") : "Off") + "</dd>" +
+        (s.credential_source ? " (key from " + esc(s.credential_source === "session" ? "the user's browser, sent with this run only" : s.credential_source === "environment" ? "the server's environment" : s.credential_source) + ", never recorded)" : " (no key)") : "Off") + "</dd>" +
       (s.investigator != null ? "<dt>Investigator</dt><dd>" + (s.investigator ? "On" : "Off") + "</dd>" : "") +
       "<dt>Thresholds</dt><dd>Flag at " + esc(s.flag_threshold) + ", coverage pad " + esc(s.coverage_pad) + ", place rows by text at score " + esc(s.relocate_min_score) + "</dd>" +
       (s.skip_sheets && s.skip_sheets.length ? "<dt>Skipped sheets</dt><dd>" + esc(s.skip_sheets.join(", ")) + "</dd>" : "") +

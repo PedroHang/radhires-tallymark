@@ -236,3 +236,33 @@ def test_key_header_is_used_and_never_stored(instance, monkeypatch):
     for path in ("", "/flags", "/audit.json"):
         assert secret not in c.get(f"/runs/{run_id}{path}").text
     assert secret not in json.dumps(c.get("/settings").json())
+
+
+def test_pasted_key_is_never_stored_on_the_server(monkeypatch):
+    """A key may only travel with the request that uses it; PUT /settings must refuse to keep one."""
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(main.app)
+    r = client.put("/settings", json={"credential": "sk-ant-api03-SECRET-test-key"})
+    assert r.status_code == 422
+    s = client.get("/settings").json()
+    assert not any(p["credential_set"] for p in s["providers"])
+    assert "SECRET" not in client.get("/settings").text
+
+
+def test_header_key_is_used_for_that_request_only(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    seen = []
+    monkeypatch.setattr(main, "ping", lambda p, cred, model: (seen.append((p, cred, model)) or (True, "ok")))
+    client = TestClient(main.app)
+    client.post("/settings/test", headers={"X-Tallymark-Key": "sk-ant-api03-SECRET-a", "X-Tallymark-Model": "claude-sonnet-5-5"})
+    client.post("/settings/test")
+    assert seen[0] == ("anthropic", "sk-ant-api03-SECRET-a", "claude-sonnet-5-5")
+    assert seen[1][1] in (None, "") or not seen[1][1].endswith("SECRET-a")  # the next request doesn't inherit it

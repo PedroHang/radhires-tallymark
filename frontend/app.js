@@ -149,25 +149,62 @@ function renderLoad() {
 const PROVIDER_NAMES = { anthropic: "Claude", openai: "GPT", google: "Gemini", gemini: "Gemini" };
 const LLM_MSG = { no_credential: "no API key is set", auth_failed: "the API key was rejected", permission_denied: "the key can't use this model", model_not_found: "the model was not found for this key", rate_limited: "the API rate limited the request", connection_failed: "the model API could not be reached", disabled: "it is turned off" };
 const llmWords = (code) => LLM_MSG[code] || (/^api_error_/.test(code || "") ? `the API returned an error (${code.slice(10)})` : code ? "something unexpected failed" : "");
+/* Bring your own key. The key lives only in this browser tab (sessionStorage) and is sent only with this
+   browser's own requests (X-Tallymark-Key); the server never stores it, so it can't pay for anyone else's
+   checks, and closing the tab forgets it. Provider and model choices are kept the same way. */
+const BYOK_STORE = "tallymark.byok.v1";
+function detectProvider(k) {
+  k = (k || "").trim();
+  if (k.startsWith("sk-ant-")) return "anthropic";
+  if (k.startsWith("AIza") || k.startsWith("AQ.")) return "google";
+  if (k.startsWith("sk-")) return "openai";
+  return null;
+}
+function loadByok() {
+  let b = {};
+  try { b = JSON.parse(sessionStorage.getItem(BYOK_STORE) || "null") || {}; } catch (e) { /* storage blocked */ }
+  return { provider: b.provider || null, models: b.models || {}, keys: b.keys || {} };
+}
+function saveByok() {
+  try { sessionStorage.setItem(BYOK_STORE, JSON.stringify(state.byok)); } catch (e) { /* storage blocked: kept for this page only */ }
+}
+function llm() {
+  const s = state.settings;
+  const b = state.byok || (state.byok = loadByok());
+  const provider = (b.provider && s.providers.some((p) => p.id === b.provider)) ? b.provider : s.provider;
+  const prov = s.providers.find((p) => p.id === provider) || s.providers[0];
+  const model = (b.models[provider] && prov.models.includes(b.models[provider])) ? b.models[provider] : prov.model;
+  const mine = !!b.keys[provider];
+  return { provider, prov, model, keySet: mine || prov.credential_set, source: mine ? "browser" : (prov.credential_set ? "server" : null) };
+}
+function llmHeaders() {
+  const e = llm();
+  const h = { "X-Tallymark-Provider": e.provider, "X-Tallymark-Model": e.model };
+  if (state.byok.keys[e.provider]) h["X-Tallymark-Key"] = state.byok.keys[e.provider];
+  return h;
+}
+function refreshLlmUi() { renderProviderFields(); renderKeyStatus(); renderByok(); }
+
 function renderByok() {
   const s = state.settings;
   const el = $("#byok");
   if (!el) return;
   if (!s) { el.innerHTML = ""; return; }
-  const prov = (s.providers || []).find((p) => p.id === s.provider);
-  const name = PROVIDER_NAMES[s.provider] || prov?.label || s.provider;
+  const e = llm();
+  const name = PROVIDER_NAMES[e.provider] || e.prov?.label || e.provider;
   const err = state.keyError || (state.lastLlmError && !["disabled", "no_credential"].includes(state.lastLlmError)
     ? `The last check could not use the AI: ${llmWords(state.lastLlmError)}. Ambiguous items were flagged for review without it.` : null);
   const errHtml = err ? `<div class="byok-err" role="alert">${icon("alert")}<span>${esc(err)} <button type="button" class="link-btn" id="byok-fix">Fix key</button></span></div>` : "";
-  if (s.credential_set) {
+  if (e.keySet) {
     const on = state.useLlm;
+    const whose = e.source === "browser" ? "your key, kept in this tab only" : "the server's key";
     el.className = `byok on${on ? "" : " off"}`;
     el.innerHTML = `
       <span class="byok-ico" aria-hidden="true">${icon(on ? "sparkle" : "key")}</span>
       <div class="byok-main">
         <div class="byok-line"><span class="dot" aria-hidden="true"></span>${on
-          ? `<span><b>AI check on:</b> ${esc(name)} (<span class="mono">${esc(s.model)}</span>)</span>`
-          : `<span><b>AI check off for this run.</b> Your ${esc(name)} key is set.</span>`}
+          ? `<span><b>AI check on:</b> ${esc(name)} (<span class="mono">${esc(e.model)}</span>), ${whose}</span>`
+          : `<span><b>AI check off for this run.</b> ${e.source === "browser" ? `Your ${esc(name)} key is set in this tab.` : `A ${esc(name)} key is available.`}</span>`}
           <button type="button" class="link-btn" id="byok-change">Change</button></div>
         ${errHtml}
       </div>
@@ -180,7 +217,7 @@ function renderByok() {
       <span class="byok-ico" aria-hidden="true">${icon("key")}</span>
       <div class="byok-main">
         <h2 class="byok-title">Optional: bring your own AI key</h2>
-        <p class="byok-text">Tallymark works without a key (rules decide every clear case). Add an Anthropic (Claude), OpenAI (GPT) or Google (Gemini) key to let a model check the ambiguous items. The key stays in this server's memory and is never saved.</p>
+        <p class="byok-text">Tallymark works without a key (rules decide every clear case). Add an Anthropic (Claude), OpenAI (GPT) or Google (Gemini) key to let a model check the ambiguous items. Your key stays in this browser tab, is sent only with your own checks, and is never stored on the server. Closing the tab forgets it.</p>
         <div class="byok-provs" aria-label="Supported providers">
           <span class="prov-pill"><i class="prov-dot" style="background:#D97757" aria-hidden="true"></i>Anthropic <small>Claude</small></span>
           <span class="prov-pill"><i class="prov-dot" style="background:#10A37F" aria-hidden="true"></i>OpenAI <small>GPT</small></span>
@@ -264,7 +301,8 @@ async function startRun(force = false) {
   fd.append("skip_sheets", JSON.stringify(state.skipSheets));
   if (b.simulated) fd.append("simulated", "true");
   try {
-    const res = await api("/runs", { method: "POST", body: fd });
+    // the browser's own key (if any) goes with this request only; it is never sent when the AI check is off
+    const res = await api("/runs", { method: "POST", body: fd, headers: state.useLlm ? llmHeaders() : {} });
     state.runId = res.run_id;
     // A host that runs the check synchronously (serverless) answers with the finished run: go straight to results.
     if (isFinished(res.status)) { clearTimeout(procTimer); await loadResults(); return; }
@@ -1158,6 +1196,7 @@ async function downloadCsv() {
 /* ------------------------------------------------------------------ settings */
 async function loadSettings() {
   state.settings = await api("/settings");
+  state.byok = loadByok();
   if (!Object.keys(state.exclusions).length) {
     for (const x of state.settings.exclusions) state.exclusions[x.key] = x.default;
   }
@@ -1183,30 +1222,26 @@ function openSettings(opts = {}) {
 }
 function renderProviderFields() {
   const s = state.settings;
-  const prov = s.providers.find((p) => p.id === s.provider);
-  $("#provider-select").innerHTML = s.providers.map((p) => `<option value="${p.id}" ${p.id === s.provider ? "selected" : ""}>${esc(p.label)}${p.credential_set ? " ✓" : ""}</option>`).join("");
-  $("#model-select").innerHTML = s.models.map((m) => `<option ${m === s.model ? "selected" : ""}>${esc(m)}</option>`).join("");
-  $("#api-key-label").textContent = prov.key_label;
-  $("#api-key").placeholder = prov.placeholder;
+  const e = llm();
+  $("#provider-select").innerHTML = s.providers.map((p) => `<option value="${p.id}" ${p.id === e.provider ? "selected" : ""}>${esc(p.label)}${(state.byok.keys[p.id] || p.credential_set) ? " ✓" : ""}</option>`).join("");
+  $("#model-select").innerHTML = e.prov.models.map((m) => `<option ${m === e.model ? "selected" : ""}>${esc(m)}</option>`).join("");
+  $("#api-key-label").textContent = e.prov.key_label;
+  $("#api-key").placeholder = e.prov.placeholder;
 }
 function renderKeyStatus(msg, ok) {
-  const s = state.settings;
   const el = $("#key-status");
   if (msg) { el.textContent = msg; el.className = `key-status ${ok ? "ok" : "bad"}`; return; }
-  if (s.credential_set) {
-    const kind = s.credential_kind === "oauth_token" ? "OAuth token" : "API key";
-    el.textContent = `${kind} set (${s.credential_source}).`;
+  const e = llm();
+  if (e.source === "browser") {
+    el.textContent = "Your key is set for this tab only. It goes with your own checks and is never stored on the server.";
+    el.className = "key-status ok";
+  } else if (e.source === "server") {
+    el.textContent = "Using a key configured on the server. Paste your own to use it instead.";
     el.className = "key-status ok";
   } else {
     el.textContent = "No key set.";
     el.className = "key-status";
   }
-}
-async function saveSettings(body) {
-  state.settings = await api("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  renderProviderFields();
-  renderKeyStatus();
-  renderByok();
 }
 
 /* ------------------------------------------------------------------ help */
@@ -1950,20 +1985,24 @@ async function boot() {
   $("#export-modal").onclick = (e) => { if (e.target.id === "export-modal") closeOverlays(); };
   $("#excl-regex").oninput = (e) => { state.extraRegex = e.target.value.trim(); renderLoad(); };
   $("#use-llm").onchange = (e) => { state.useLlm = e.target.checked; renderByok(); };
-  $("#provider-select").onchange = (e) => saveSettings({ provider: e.target.value });
-  $("#model-select").onchange = (e) => saveSettings({ model: e.target.value });
-  $("#key-save").onclick = async () => {
+  $("#provider-select").onchange = (e) => { state.byok.provider = e.target.value; saveByok(); refreshLlmUi(); };
+  $("#model-select").onchange = (e) => { state.byok.models[llm().provider] = e.target.value; saveByok(); refreshLlmUi(); };
+  $("#key-save").onclick = () => {
     const v = $("#api-key").value.trim();
     if (!v) return renderKeyStatus("Paste a key first.", false);
     state.keyError = null;
     state.lastLlmError = null;
-    await saveSettings({ credential: v });
+    const p = detectProvider(v) || llm().provider;  // a pasted key that clearly belongs to another provider switches to it
+    state.byok.keys[p] = v;
+    state.byok.provider = p;
+    saveByok();
     $("#api-key").value = "";
+    refreshLlmUi();
   };
-  $("#key-clear").onclick = () => saveSettings({ clear_credential: true });
+  $("#key-clear").onclick = () => { delete state.byok.keys[llm().provider]; saveByok(); state.keyError = null; refreshLlmUi(); };
   $("#key-test").onclick = async () => {
     renderKeyStatus("Testing...", true);
-    const r = await api("/settings/test", { method: "POST" });
+    const r = await api("/settings/test", { method: "POST", headers: llmHeaders() });
     renderKeyStatus(r.message, r.ok);
     state.keyError = r.ok ? null : `The key test failed: ${r.message}`;
     if (r.ok) state.lastLlmError = null;

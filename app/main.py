@@ -206,13 +206,11 @@ def put_settings(body: SettingsIn):
             raise HTTPException(422, f"Unknown provider {body.provider}.")
         _settings["provider"] = body.provider
     if body.credential:
-        key = body.credential.strip()
-        # a pasted key that clearly belongs to another provider switches to that provider
-        _settings["provider"] = detect_provider(key) or _settings["provider"]
-        _settings["credentials"][_settings["provider"]] = key
+        # Never keep a user's key in server memory: it would be used for every other visitor's checks on this
+        # instance. The browser keeps the key and sends it with each of its own requests (X-Tallymark-Key).
+        raise HTTPException(422, "Keys are not stored on the server. Tallymark keeps your key in this browser "
+                                 "tab and sends it only with your own checks.")
     p = _settings["provider"]
-    if body.clear_credential:
-        _settings["credentials"][p] = None
     if body.model:
         _settings["models"][p] = body.model
     if body.investigator is not None:
