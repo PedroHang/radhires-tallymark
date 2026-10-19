@@ -266,3 +266,26 @@ def test_header_key_is_used_for_that_request_only(monkeypatch):
     client.post("/settings/test")
     assert seen[0] == ("anthropic", "sk-ant-api03-SECRET-a", "claude-sonnet-5-5")
     assert seen[1][1] in (None, "") or not seen[1][1].endswith("SECRET-a")  # the next request doesn't inherit it
+
+
+def test_request_headers_reach_the_blob_sdk_and_worker_threads():
+    """The Blob SDK authenticates with the per-request OIDC header: the middleware must expose it, and
+    store._off_loop must carry it into its worker thread."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from vercel.headers import get_headers
+
+    from app import main, store
+
+    probe_app = FastAPI()
+    seen = {}
+
+    @probe_app.get("/probe")
+    async def probe():  # async route: _off_loop hands the work to its pool thread
+        seen["route"] = (get_headers() or {}).get("x-vercel-oidc-token")
+        seen["thread"] = store._off_loop(lambda: (get_headers() or {}).get("x-vercel-oidc-token"))
+        return {}
+
+    probe_app.add_middleware(main._VercelRequestHeaders)
+    TestClient(probe_app).get("/probe", headers={"x-vercel-oidc-token": "tok-123"})
+    assert seen == {"route": "tok-123", "thread": "tok-123"}

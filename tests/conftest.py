@@ -5,7 +5,11 @@ present, from a local data/cache) so the suite does not re-run OCR on every sess
 """
 from __future__ import annotations
 
+import os
 import shutil
+
+# never pick up the developer's real keys from a local .env during tests
+os.environ["TALLYMARK_DOTENV"] = "0"
 from pathlib import Path
 
 import pytest

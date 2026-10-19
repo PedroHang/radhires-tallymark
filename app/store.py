@@ -73,11 +73,14 @@ def _off_loop(fn, *args, **kwargs):
     """The Blob SDK's sync API must not run on a thread with an active event loop (async routes)."""
     import asyncio
 
+    import contextvars
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return fn(*args, **kwargs)
-    return _POOL.submit(fn, *args, **kwargs).result()
+    # carry the request context (the Vercel OIDC token header the SDK authenticates with) into the worker thread
+    return _POOL.submit(contextvars.copy_context().run, fn, *args, **kwargs).result()
 
 
 class BlobStore:

@@ -38,6 +38,27 @@ MAX_SHEETS = 20
 app = FastAPI(title="Tallymark", version="1.0")
 
 
+class _VercelRequestHeaders:
+    """On Vercel, each request carries the OIDC token (x-vercel-oidc-token) the Blob SDK authenticates
+    with; the SDK reads it from a context variable that the app must set per request."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            try:
+                from vercel.headers import headers_from_asgi_scope, set_headers
+
+                set_headers(headers_from_asgi_scope(scope))
+            except Exception:  # noqa: BLE001  SDK absent or older: Blob falls back to env credentials
+                pass
+        await self.inner(scope, receive, send)
+
+
+app.add_middleware(_VercelRequestHeaders)
+
+
 def sync_runs() -> bool:
     """On Vercel (or with TALLYMARK_SYNC=1) a run executes inside the POST /runs request, because a
     serverless function may not keep working after it has sent its response."""
@@ -59,7 +80,7 @@ _settings = {"provider": DEFAULT_PROVIDER,
 
 def _load_env_file() -> None:
     env = ROOT / ".env"
-    if not env.exists():
+    if os.environ.get("TALLYMARK_DOTENV") == "0" or not env.exists():  # the test suite turns this off
         return
     for line in env.read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.strip().startswith("#"):
