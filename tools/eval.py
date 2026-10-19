@@ -82,6 +82,8 @@ def _run(pdf: Path, boc_csv: str, boc_name: str, model_check: bool = True) -> tu
     elapsed = time.perf_counter() - t0
     out = store.get_run(run_id)
     store.delete_run(run_id)
+    if out["status"] != "complete":  # a failed run would silently count as "no flags"
+        print(f"WARNING: {pdf.name} / {boc_name} ended '{out['status']}': {out.get('error')}", flush=True)
     if opts.use_llm:
         _note_usage(pdf, out)
     return out, elapsed

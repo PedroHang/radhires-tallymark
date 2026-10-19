@@ -44,12 +44,12 @@
             },
             "no_bbox": {
               "seeded": 4,
-              "hits": 2,
-              "flags": 5,
-              "true_flags": 2
+              "hits": 3,
+              "flags": 3,
+              "true_flags": 3
             },
             "rows": 45,
-            "warm_seconds": 0.42
+            "warm_seconds": 0.48
           },
           {
             "seeded": [
@@ -87,11 +87,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 3,
-              "flags": 6,
+              "flags": 4,
               "true_flags": 3
             },
             "rows": 45,
-            "warm_seconds": 0.44
+            "warm_seconds": 0.47
           }
         ]
       }
@@ -105,8 +105,8 @@
       "false_flags_per_clean_sheet": 0.0,
       "false_flags_per_clean_sheet_rules_only": 0.0,
       "review_load": 0.08888888888888889,
-      "recall_no_bbox": 0.625,
-      "precision_no_bbox": 0.45454545454545453,
+      "recall_no_bbox": 0.75,
+      "precision_no_bbox": 0.8571428571428571,
       "seeded_by_op": {
         "reduce_places": 2,
         "drop_later_sheet_row": 2,
@@ -173,7 +173,7 @@
               "true_flags": 4
             },
             "rows": 2,
-            "warm_seconds": 0.23
+            "warm_seconds": 0.26
           },
           {
             "seeded": [
@@ -215,7 +215,7 @@
               "true_flags": 4
             },
             "rows": 2,
-            "warm_seconds": 0.22
+            "warm_seconds": 0.25
           }
         ]
       },
@@ -267,11 +267,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 8,
+              "flags": 6,
               "true_flags": 4
             },
             "rows": 10,
-            "warm_seconds": 0.47
+            "warm_seconds": 0.56
           },
           {
             "seeded": [
@@ -309,11 +309,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 8,
+              "flags": 6,
               "true_flags": 4
             },
             "rows": 10,
-            "warm_seconds": 0.48
+            "warm_seconds": 0.52
           }
         ]
       },
@@ -361,11 +361,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 5,
+              "flags": 4,
               "true_flags": 4
             },
             "rows": 6,
-            "warm_seconds": 0.23
+            "warm_seconds": 0.25
           },
           {
             "seeded": [
@@ -403,11 +403,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 3,
-              "flags": 5,
+              "flags": 4,
               "true_flags": 3
             },
             "rows": 6,
-            "warm_seconds": 0.21
+            "warm_seconds": 0.24
           }
         ]
       },
@@ -457,11 +457,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 5,
+              "flags": 4,
               "true_flags": 4
             },
             "rows": 3,
-            "warm_seconds": 0.23
+            "warm_seconds": 0.24
           },
           {
             "seeded": [
@@ -499,11 +499,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 5,
+              "flags": 4,
               "true_flags": 4
             },
             "rows": 3,
-            "warm_seconds": 0.22
+            "warm_seconds": 0.24
           }
         ]
       },
@@ -568,11 +568,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 3,
-              "flags": 7,
+              "flags": 6,
               "true_flags": 3
             },
             "rows": 6,
-            "warm_seconds": 0.62
+            "warm_seconds": 0.66
           },
           {
             "seeded": [
@@ -609,12 +609,12 @@
             },
             "no_bbox": {
               "seeded": 4,
-              "hits": 4,
-              "flags": 7,
-              "true_flags": 4
+              "hits": 3,
+              "flags": 5,
+              "true_flags": 3
             },
             "rows": 6,
-            "warm_seconds": 0.6
+            "warm_seconds": 0.69
           }
         ]
       },
@@ -681,11 +681,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 7,
+              "flags": 6,
               "true_flags": 4
             },
             "rows": 7,
-            "warm_seconds": 0.59
+            "warm_seconds": 0.69
           },
           {
             "seeded": [
@@ -722,12 +722,12 @@
             },
             "no_bbox": {
               "seeded": 4,
-              "hits": 3,
+              "hits": 4,
               "flags": 6,
-              "true_flags": 3
+              "true_flags": 4
             },
             "rows": 7,
-            "warm_seconds": 0.59
+            "warm_seconds": 0.64
           }
         ]
       },
@@ -827,11 +827,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 3,
-              "flags": 10,
+              "flags": 8,
               "true_flags": 3
             },
             "rows": 19,
-            "warm_seconds": 0.6
+            "warm_seconds": 0.66
           }
         ]
       },
@@ -889,11 +889,11 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 15,
+              "flags": 12,
               "true_flags": 4
             },
             "rows": 27,
-            "warm_seconds": 0.76
+            "warm_seconds": 0.78
           },
           {
             "seeded": [
@@ -931,7 +931,7 @@
             "no_bbox": {
               "seeded": 4,
               "hits": 4,
-              "flags": 15,
+              "flags": 11,
               "true_flags": 4
             },
             "rows": 27,
@@ -950,7 +950,7 @@
       "false_flags_per_clean_sheet_rules_only": 0.4782608695652174,
       "review_load": 1.16875,
       "recall_no_bbox": 0.9375,
-      "precision_no_bbox": 0.49586776859504134,
+      "precision_no_bbox": 0.6,
       "seeded_by_op": {
         "drop_row": 40,
         "reduce_places": 14,
@@ -974,6 +974,8 @@
   "settings": {
     "variants": 2,
     "seeds_per_variant": 4,
-    "model_check": "off"
-  }
+    "model_check": "off",
+    "investigator": false
+  },
+  "model_usage_per_drawing": {}
 }

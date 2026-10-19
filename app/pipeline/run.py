@@ -236,7 +236,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
     _stage(run_id, "match", "running")
     checked_rows = [r for r in rows if r.sheet in sheets]
     with tr.stage("match") as st:
-        relocated = locate_rows_without_bbox(checked_rows, regions, tr.placements)
+        relocated = locate_rows_without_bbox(checked_rows, regions, tr.placements, aspect)
         subtract_coverage(checked_rows, regions, aspect, tr.coverage)
         located = sum(1 for r in checked_rows if r.bbox is not None)
         st["in"] = {"rows": len(checked_rows), "regions": len(regions)}

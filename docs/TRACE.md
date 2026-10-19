@@ -220,7 +220,7 @@ Field reference:
 | `ocr_conf` | The OCR recognition score (0-1) for OCR regions; `null` for PDF text and frame-only regions (they have no OCR score). When the ±30° pass replaced an upright read, it is the winning read's score. |
 | `origin` / `sources` | `origin`: which reader created the region. `sources`: everything that saw it (`text_layer` = the PDF text agreed; `fcf_grid` = a frame was attached). |
 | `coverage.candidates[]` | Every BoC row whose (padded) box this region fell into. `passed_by` is the test that made the row cover it (see catalog `coverage_tests`), `null` when it failed. `distance_mm` is centre to centre. |
-| `coverage.rows_placed_here[]` | Rows that had no location and were placed on this region by text match (`{char_no, region_id, score}`). |
+| `coverage.rows_placed_here[]` | Rows that had no location and were placed by text match on a callout that includes this region (`{char_no, region_id, region_ids, score, claim}`: `region_ids` is the whole callout, which can be several OCR fragments of one line; `claim` is 2+ when a row with places = N was also placed on a repeated copy). |
 | `coverage.nearest_row` | Nearest located row on the sheet, for any region. |
 | `exclusion` | `applied` is the exclusion key, `label` its plain name, `detail` the zone (`{template, zone, center}`) or the `pattern` that matched. Covered regions are never checked. |
 | `classification` | The group this leftover belongs to, the rule outcome, and every rule check in evaluation order (`fired` / `matched_after` / `no_match`). `null` for covered or excluded regions. |

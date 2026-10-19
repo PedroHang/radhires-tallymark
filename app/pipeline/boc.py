@@ -54,9 +54,11 @@ class Characteristic:
     bbox_source: str | None = None  # "export" | "text_match" | None
     source_text: str | None = None
     located_regions: list[str] = field(default_factory=list)
+    extra_bboxes: list[Box] = field(default_factory=list)  # further callouts a places = N row was placed on
 
     def to_dict(self) -> dict:
-        return {
+        extra = {"extra_bboxes": [b.to_dict() for b in self.extra_bboxes]} if self.extra_bboxes else {}
+        return extra | {
             "char_no": self.char_no,
             "sheet": self.sheet,
             "zone": self.zone,

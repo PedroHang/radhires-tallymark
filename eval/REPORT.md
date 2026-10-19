@@ -9,8 +9,8 @@ Measured by `python -m tools.eval` on public NIST MBE PMI drawings with seeded c
 | False flags per clean sheet (all) | <= 2 | 0.00 | 2.78 |
 | False flags per clean sheet (excluding R8 items the model check would judge) | (not set) | 0.00 | 0.48 |
 | Review load (flags / BoC rows) | <= 10% | 9% | 117% |
-| Recall without bbox | >= 75% | 62% | 94% |
-| Precision without bbox | (not set) | 45% | 50% |
+| Recall without bbox | >= 75% | 75% | 94% |
+| Precision without bbox | (not set) | 86% | 60% |
 
 Tier B skipped (fewer than 6 reader-proposed rows): nist_ctc_05_asme1_rd.pdf, nist_ftc_11_asme1_rb.pdf.
 
@@ -26,13 +26,13 @@ Tier A: 1 drawing, 3 sheets, 8 seeded items. Tier B: 8 drawings, 23 sheets, 64 s
 
 | Drawing | Tier | Sheets | Rows | Clean false flags | Recall (bbox) | Recall (no bbox) | Flags on variants |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| nist_ftc_06_asme1_rd.pdf | A | 3 | 48 | 0 | 8/8 | 5/8 | 8 |
+| nist_ftc_06_asme1_rd.pdf | A | 3 | 48 | 0 | 8/8 | 6/8 | 8 |
 | nist_ctc_01_asme1_rd.pdf | B | 1 | 6 | 8 | 8/8 | 8/8 | 24 |
 | nist_ctc_02_asme1_rc.pdf | B | 3 | 13 | 3 | 8/8 | 8/8 | 12 |
 | nist_ctc_03_asme1_rc.pdf | B | 1 | 9 | 0 | 8/8 | 7/8 | 8 |
 | nist_ctc_04_asme1_rd.pdf | B | 1 | 6 | 1 | 8/8 | 8/8 | 8 |
-| nist_ftc_07_asme1_rd.pdf | B | 4 | 9 | 16 | 7/8 | 7/8 | 40 |
-| nist_ftc_08_asme1_rc.pdf | B | 4 | 10 | 18 | 8/8 | 7/8 | 43 |
+| nist_ftc_07_asme1_rd.pdf | B | 4 | 9 | 16 | 7/8 | 6/8 | 40 |
+| nist_ftc_08_asme1_rc.pdf | B | 4 | 10 | 18 | 8/8 | 8/8 | 43 |
 | nist_ftc_09_asme1_rd.pdf | B | 4 | 22 | 9 | 8/8 | 7/8 | 26 |
 | nist_ftc_10_asme1_rb.pdf | B | 5 | 30 | 9 | 8/8 | 8/8 | 26 |
 

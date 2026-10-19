@@ -491,7 +491,8 @@ class RunTrace:
         merged_into = {id(f): w for f, w in self._merged}
         placed_at: dict[str, list[dict]] = {}
         for p in self.placements:
-            placed_at.setdefault(p["region_id"], []).append(p)
+            for rid in p.get("region_ids") or [p["region_id"]]:
+                placed_at.setdefault(rid, []).append(p)
         groups = {g["group_id"]: g for g in self.groups}
         places_by_region: dict[str, list[dict]] = {}
         for rec in self.places_checks:
