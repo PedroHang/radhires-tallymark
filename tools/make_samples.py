@@ -80,7 +80,7 @@ GT = [
     (3, "gdt", "⌖ Ø.015 D H", 1, ["ΦQ.015|DH"]),
 ]
 
-# The 4 seeded items used in the demo (BRD 6.9 storyboard).
+# The 4 seeded items used in the demo (the demo storyboard).
 SEEDS = [
     {"op": "drop_notes", "requirement": "⌓ .05 A B C APPLIES TO ALL UNTOLERANCED SURFACES (NOTE 4)", "sheet": 1,
      "expect": "unaccounted"},

@@ -1,0 +1,163 @@
+/* Tallymark first-run tour. Pairs with tour.js. Everything is scoped under .tt-root.
+ * Colors come from the app's tokens when they exist, with safe fallbacks. */
+
+.tt-root {
+  --tt-surface: var(--surface, var(--panel, #ffffff));
+  --tt-ink: var(--ink, #1a1f2b);
+  --tt-ink-2: var(--ink-2, #5b6675);
+  --tt-muted: var(--muted, #8a94a3);
+  --tt-border: var(--border, #d9dde3);
+  --tt-accent: var(--accent, #2a5bd7);
+  --tt-accent-ink: var(--accent-ink, #ffffff);
+  --tt-radius: var(--radius, 12px);
+  --tt-dim: rgba(12, 17, 26, 0.58);
+  /* rgba fallbacks first; color-mix versions below when supported (an invalid
+     var inside box-shadow would drop the whole dim layer). */
+  --tt-ring: rgba(80, 130, 230, 0.75);
+  --tt-glow: rgba(80, 130, 230, 0.28);
+  --tt-kbd-bg: rgba(127, 127, 127, 0.12);
+  --tt-shadow: 0 18px 48px rgba(12, 17, 26, 0.28), 0 2px 6px rgba(12, 17, 26, 0.12);
+  --tt-ease: cubic-bezier(.2, .7, .2, 1);
+
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000; /* above the app's drawers (70), modals (70) and toast (60) */
+  font-family: var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif);
+  color: var(--tt-ink);
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .tt-root {
+    --tt-ring: color-mix(in srgb, var(--tt-accent) 60%, transparent);
+    --tt-glow: color-mix(in srgb, var(--tt-accent) 26%, transparent);
+    --tt-kbd-bg: color-mix(in srgb, var(--tt-ink) 7%, var(--tt-surface));
+  }
+}
+.tt-root.tt-in { opacity: 1; }
+.tt-root.tt-leaving { opacity: 0; pointer-events: none; }
+.tt-root[hidden] { display: none !important; }
+
+[data-theme="dark"] .tt-root {
+  --tt-surface: var(--surface, var(--panel, #1b212c));
+  --tt-ink: var(--ink, #e8ecf2);
+  --tt-ink-2: var(--ink-2, #aab3c0);
+  --tt-muted: var(--muted, #7f8a99);
+  --tt-border: var(--border, #2c3442);
+  --tt-accent: var(--accent, #6d93ff);
+  --tt-accent-ink: var(--accent-ink, #0b1220);
+  --tt-dim: rgba(0, 0, 0, 0.66);
+  --tt-shadow: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tt-root {
+    --tt-surface: var(--surface, var(--panel, #1b212c));
+    --tt-ink: var(--ink, #e8ecf2);
+    --tt-ink-2: var(--ink-2, #aab3c0);
+    --tt-muted: var(--muted, #7f8a99);
+    --tt-border: var(--border, #2c3442);
+    --tt-accent: var(--accent, #6d93ff);
+    --tt-accent-ink: var(--accent-ink, #0b1220);
+    --tt-dim: rgba(0, 0, 0, 0.66);
+    --tt-shadow: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  }
+}
+
+/* Transparent layer that eats every click on the dimmed page. */
+.tt-blocker { position: fixed; inset: 0; background: transparent; cursor: default; }
+
+/* The spotlight: one box, the page dim is its huge outer shadow, so the target stays at full brightness. */
+.tt-spot {
+  position: fixed;
+  left: 50%; top: 50%; width: 0; height: 0;
+  border-radius: calc(var(--tt-radius) * .75);
+  box-shadow:
+    0 0 0 2px var(--tt-ring),
+    0 0 0 7px var(--tt-glow),
+    0 0 0 200vmax var(--tt-dim);
+  pointer-events: none;
+  transition: left .38s var(--tt-ease), top .38s var(--tt-ease), width .38s var(--tt-ease), height .38s var(--tt-ease);
+}
+.tt-spot.tt-noanim { transition: none; }
+
+/* The card. */
+.tt-card {
+  position: fixed;
+  left: 0; top: 0;
+  width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 16px 18px 14px;
+  background: var(--tt-surface);
+  color: var(--tt-ink);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius);
+  box-shadow: var(--tt-shadow);
+  outline: none;
+  transition: left .38s var(--tt-ease), top .38s var(--tt-ease);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.tt-card.tt-docked { width: min(460px, calc(100vw - 24px)); }
+.tt-card[aria-busy="true"] .tt-text, .tt-card[aria-busy="true"] .tt-title { opacity: .55; }
+
+.tt-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.tt-count {
+  font: 600 11px/1 var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+  letter-spacing: .04em;
+  color: var(--tt-accent);
+}
+.tt-skip {
+  margin-left: auto;
+  border: 0; background: none; padding: 4px 2px;
+  font: inherit; font-size: 12px;
+  color: var(--tt-ink-2);
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  cursor: pointer;
+}
+.tt-skip:hover { color: var(--tt-ink); }
+
+.tt-title { margin: 0 0 6px; font-size: 15.5px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: var(--tt-ink); }
+.tt-text { color: var(--tt-ink-2); transition: opacity .15s ease; }
+.tt-text b { color: var(--tt-ink); font-weight: 600; }
+
+.tt-card kbd, .tt-hint kbd {
+  display: inline-block; min-width: 18px; padding: 0 5px;
+  border: 1px solid var(--tt-border); border-bottom-width: 2px; border-radius: 5px;
+  background: var(--tt-kbd-bg); color: var(--tt-ink);
+  font: 600 11px/17px var(--mono, ui-monospace, Consolas, monospace);
+  text-align: center;
+}
+
+.tt-dots { display: flex; gap: 5px; margin: 14px 0 0; }
+.tt-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--tt-border); transition: width .25s var(--tt-ease), background .25s ease; }
+.tt-dots i.past { background: var(--tt-muted); background: color-mix(in srgb, var(--tt-accent) 45%, var(--tt-border)); }
+.tt-dots i.on { width: 18px; background: var(--tt-accent); }
+
+.tt-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.tt-hint { margin-right: auto; font-size: 11px; color: var(--tt-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-hint kbd { min-width: 14px; padding: 0 3px; font-size: 10px; line-height: 14px; margin-right: 1px; }
+
+.tt-btn {
+  height: 32px; padding: 0 14px;
+  border-radius: calc(var(--tt-radius) * .6);
+  border: 1px solid var(--tt-border);
+  background: var(--tt-surface); color: var(--tt-ink);
+  font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, opacity .15s ease;
+}
+.tt-btn:hover:not(:disabled) { border-color: var(--tt-muted); }
+.tt-btn:disabled { opacity: .4; cursor: default; }
+.tt-next { background: var(--tt-accent); border-color: var(--tt-accent); color: var(--tt-accent-ink); min-width: 76px; }
+.tt-next:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--tt-accent); }
+
+.tt-card :focus-visible { outline: 2px solid var(--tt-accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .tt-hint { display: none; }
+  .tt-card { padding: 14px 16px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt-root, .tt-spot, .tt-card, .tt-text, .tt-dots i { transition: none !important; }
+}

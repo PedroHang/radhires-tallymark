@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour harness</title>
+<script>
+  /* Same theme bootstrap as the app: ?theme=dark|light wins, then the app's stored choice, then the system. */
+  (function () {
+    var t = (location.search.match(/[?&]theme=(light|dark)/) || [])[1] || null;
+    if (!t) try { t = localStorage.getItem("tallymark-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+<link rel="stylesheet" href="../tour.css">
+<style>
+  /* A static mock of the results screen. Self-contained on purpose: it does not load app.css,
+     so it keeps working while the real app styles change. Tokens mirror the names tour.css reads. */
+  :root {
+    --bg: #F4F6F9; --surface: #FFFFFF; --border: #D9DDE3; --border-soft: #EEF0F3; --canvas: #EDEFF2;
+    --ink: #1B2430; --ink-2: #5B6675; --muted: #8A94A3; --accent: #2F5D8A; --red: #C8372D; --amber: #B7791F;
+    --radius: 12px;
+    --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #0F131A; --surface: #171C25; --border: #2A3240; --border-soft: #202734; --canvas: #0C1016;
+    --ink: #E6EAF0; --ink-2: #A8B1BE; --muted: #737E8D; --accent: #7AA2D6; --red: #E5534B; --amber: #D69E3A;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.4 var(--sans); }
+  [hidden] { display: none !important; }
+  button { font: inherit; }
+  #app { height: 100vh; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+  .brand { font-weight: 600; }
+  .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .actions-top { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .btn { height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 8px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+  .dev { border-style: dashed; color: var(--ink-2); font-size: 11.5px; height: 26px; }
+  .summary { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .big { font: 600 28px/1 var(--mono); color: var(--red); }
+  .bar { flex: 1; min-width: 140px; max-width: 420px; height: 6px; display: flex; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar i { background: var(--muted); } .bar b { background: var(--red); }
+  .review { margin-left: auto; color: var(--ink-2); }
+  .workspace { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 116px; flex: 0 0 116px; background: var(--surface); border-right: 1px solid var(--border); padding: 12px 10px; overflow: auto; }
+  .rail-title { font-size: 10.5px; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+  .thumb { position: relative; display: block; width: 100%; aspect-ratio: 1.3; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas); margin-bottom: 9px; cursor: pointer; }
+  .thumb.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .badge { position: absolute; right: 4px; bottom: 4px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--red); color: #fff; font: 600 10px/16px var(--mono); text-align: center; padding: 0 4px; }
+  .canvas-col { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+  .toolbar { display: flex; gap: 8px; align-items: center; padding: 7px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .sheet-select { display: none; height: 26px; }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; background: var(--surface); color: var(--ink-2); height: 24px; padding: 0 10px; }
+  .seg button.on { background: var(--ink); color: var(--surface); }
+  .viewport { flex: 1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 18px; min-height: 0; }
+  .viewport svg { width: 100%; height: 100%; max-height: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+  .flags-col { width: 320px; flex: 0 0 320px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .flags-head { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .chips { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .chip { height: 23px; padding: 0 9px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--ink-2); font-size: 11.5px; }
+  .chip.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+  .flag-list { flex: 1; overflow: auto; }
+  .flag-row { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+  .flag-row:hover { background: var(--bg); }
+  .flag-row.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .ft { flex: 0 0 18px; height: 18px; color: #fff; font: 600 10px/18px var(--mono); text-align: center; background: var(--red); }
+  .ft.p { background: var(--amber); }
+  .fmeta { font: 11px var(--mono); color: var(--muted); }
+  .detail { flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--surface); padding: 12px 16px; max-height: 44vh; overflow: auto; }
+  .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .panel { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--bg); }
+  .plabel { font-size: 10.5px; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+  .decisions { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-soft); flex-wrap: wrap; }
+  .k { font-family: var(--mono); opacity: .6; margin-left: 4px; }
+  .log { position: fixed; left: 130px; top: 140px; z-index: 50; max-width: 360px; font: 11px var(--mono); color: var(--ink-2); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; pointer-events: none; opacity: .92; }
+  /* a fake app modal, to prove the tour sits above the app's own layers */
+  .fake-drawer { position: fixed; inset: 0 0 0 auto; width: 300px; background: var(--surface); border-left: 1px solid var(--border); z-index: 70; padding: 16px; box-shadow: -8px 0 30px rgba(0,0,0,.2); }
+
+  @media (max-width: 1279px) {
+    .rail { display: none; }
+    .sheet-select { display: block; }
+    .detail { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 40; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .flags-col { width: 280px; flex-basis: 280px; }
+  }
+  @media (max-width: 800px) {
+    .workspace { flex-direction: column; }
+    .canvas-col { min-height: 50vh; }
+    .flags-col { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--border); }
+    .detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <span class="brand">Tallymark<small>tour harness</small></span>
+    <div class="actions-top">
+      <button class="btn dev" id="dev-start">Start tour (force)</button>
+      <button class="btn dev" id="dev-first">maybeStartFirstRun()</button>
+      <button class="btn dev" id="dev-reset">reset()</button>
+      <button class="btn dev" id="dev-select">Toggle selected flag</button>
+      <button class="btn dev" id="dev-hooks" aria-pressed="true">before() hooks: on</button>
+      <button class="btn dev" id="dev-drawer">Open app drawer</button>
+      <button class="btn dev" id="dev-theme">Theme</button>
+      <button class="btn btn-primary" id="btn-export" data-tour="export">Export exceptions</button>
+    </div>
+  </header>
+
+  <main id="screen-results" style="flex:1; display:flex; flex-direction:column; min-height:0">
+    <div class="summary" data-tour="summary">
+      <span class="big">7</span><span style="color:var(--ink-2)">requirements unaccounted</span>
+      <div class="bar"><i style="width:82%"></i><b style="width:6%"></b></div>
+      <span style="color:var(--ink-2)"><b class="mono">41</b> rows covered</span>
+      <span class="review">Reviewed 2 of 9</span>
+    </div>
+    <div class="workspace">
+      <aside class="rail" data-tour="sheets">
+        <div class="rail-title">SHEETS</div>
+        <div class="thumb active"><span class="badge">5</span></div>
+        <div class="thumb"><span class="badge">3</span></div>
+        <div class="thumb"><span class="badge">1</span></div>
+      </aside>
+      <section class="canvas-col">
+        <div class="toolbar">
+          <select class="sheet-select" data-tour="sheets" aria-label="Sheet"><option>Sheet 1 (5)</option><option>Sheet 2 (3)</option></select>
+          <button class="btn" style="height:24px">Fit</button>
+          <button class="btn" style="height:24px">+</button>
+          <button class="btn" style="height:24px">-</button>
+          <div class="seg"><button class="on">Faded</button><button>Original</button></div>
+        </div>
+        <div class="viewport" data-tour="canvas">
+          <svg viewBox="0 0 1100 850" preserveAspectRatio="xMidYMid meet" aria-label="Mock drawing">
+            <rect x="20" y="20" width="1060" height="810" fill="none" stroke="#999" stroke-width="2"/>
+            <g fill="#8A94A3" fill-opacity=".14" stroke="#8A94A3" stroke-opacity=".5">
+              <rect x="120" y="120" width="140" height="28"/><rect x="420" y="180" width="160" height="28"/>
+              <rect x="300" y="420" width="120" height="28"/><rect x="700" y="520" width="150" height="28"/>
+              <rect x="160" y="640" width="130" height="28"/>
+            </g>
+            <g fill="#C8372D" fill-opacity=".12" stroke="#C8372D" stroke-width="2.5">
+              <rect x="640" y="240" width="150" height="30"/><rect x="250" y="300" width="110" height="30"/>
+            </g>
+            <g fill="#B7791F" fill-opacity=".12" stroke="#B7791F" stroke-width="2.5" stroke-dasharray="8 5">
+              <rect x="820" y="380" width="120" height="30"/>
+            </g>
+            <path d="M200 260 h500 v300 h-500 z M350 340 a60 60 0 1 0 0.1 0" fill="none" stroke="#666" stroke-width="2"/>
+            <rect x="760" y="700" width="300" height="110" fill="none" stroke="#999"/>
+          </svg>
+        </div>
+      </section>
+      <aside class="flags-col" data-tour="flags">
+        <div class="flags-head">
+          <div class="rail-title">FLAGS</div>
+          <div class="chips"><button class="chip on">All 9</button><button class="chip">U 7</button><button class="chip">P 2</button><button class="chip">Open 7</button></div>
+        </div>
+        <div class="flag-list" id="flag-list"></div>
+      </aside>
+    </div>
+    <section class="detail" id="detail" data-tour="detail" hidden>
+      <div class="rail-title">FLAG DETAIL</div>
+      <div class="detail-grid">
+        <div class="panel"><div class="plabel">WHAT THE BOC SAYS</div>No row covers this region.</div>
+        <div class="panel"><div class="plabel">ON THE DRAWING</div><span style="font-family:var(--mono)">&#8960;.250 &plusmn;.005 THRU</span></div>
+        <div class="panel"><div class="plabel">WHY IT WAS FLAGGED</div>Toleranced dimension with no matching row.</div>
+      </div>
+      <div class="decisions" data-tour="decisions">
+        <button class="btn" style="border-color:var(--red);color:var(--red)">Confirm miss<span class="k">C</span></button>
+        <button class="btn" style="border-style:dashed">Excluded by customer rule<span class="k">E</span></button>
+        <button class="btn">Dismiss<span class="k">D</span></button>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="fake-drawer" id="fake-drawer" hidden><b>App drawer (z-index 70)</b><p>The tour must render above this.</p><button class="btn" id="drawer-close">Close</button></div>
+<div class="log" id="log">events: (none)</div>
+
+<script src="../tour.js"></script>
+<script>
+  (function () {
+    var $ = function (s) { return document.querySelector(s); };
+    var flags = [["U", "S1 C3", "Ø.250 ±.005 THRU"], ["U", "S1 D2", "R.06 TYP"], ["P", "S1 B4", "4X Ø.190"], ["U", "S2 A1", ".500 ±.010"], ["U", "S2 C2", "⌖ Ø.010 A B"], ["P", "S3 B2", "6X R.125"]];
+    $("#flag-list").innerHTML = flags.map(function (f, i) {
+      return '<div class="flag-row" data-i="' + i + '"><span class="ft ' + (f[0] === "P" ? "p" : "") + '">' + f[0] + '</span><div><div class="fmeta">F-' + (i + 1) + ' · ' + f[1] + '</div><div>' + f[2] + '</div></div></div>';
+    }).join("");
+
+    function selectFlag(i) {
+      document.querySelectorAll(".flag-row").forEach(function (r) { r.classList.toggle("sel", +r.dataset.i === i); });
+      $("#detail").hidden = i == null;
+    }
+    $("#flag-list").addEventListener("click", function (e) { var r = e.target.closest(".flag-row"); if (r) selectFlag(+r.dataset.i); });
+
+    // App-style global shortcuts, to prove the tour swallows them while open.
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "c" || e.key === "e" || e.key === "d") log("APP SHORTCUT FIRED: " + e.key);
+      if (e.key === "Escape") { if (!$("#fake-drawer").hidden) $("#fake-drawer").hidden = true; else selectFlag(null); log("app Escape"); }
+    });
+
+    // Integration example: open the first flag so the detail + decisions steps have something to show.
+    function openFirstFlag() { if ($("#detail").hidden) selectFlag(0); }
+    var hooksOn = true;
+    function applySteps() {
+      TallyTour.setSteps(hooksOn
+        ? ["summary", "sheets", "canvas", "flags", { key: "detail", before: openFirstFlag }, "decisions", "export"]
+        : TallyTour.defaults());
+    }
+    applySteps();
+
+    var lines = [];
+    function log(m) { lines.push(m); lines = lines.slice(-4); $("#log").textContent = lines.join("\n"); $("#log").style.whiteSpace = "pre"; }
+    ["start", "step", "end"].forEach(function (n) {
+      document.addEventListener("tallytour:" + n, function (e) { log(n + " " + JSON.stringify(e.detail) + " | stored=" + JSON.stringify(TallyTour.status() && TallyTour.status().status)); });
+    });
+
+    $("#dev-start").onclick = function () { TallyTour.start({ force: true }); };
+    $("#dev-first").onclick = function () { log("maybeStartFirstRun -> " + TallyTour.maybeStartFirstRun()); };
+    $("#dev-reset").onclick = function () { TallyTour.reset(); log("reset; stored=" + JSON.stringify(TallyTour.status())); };
+    $("#dev-select").onclick = function () { selectFlag($("#detail").hidden ? 0 : null); };
+    $("#dev-hooks").onclick = function () { hooksOn = !hooksOn; this.textContent = "before() hooks: " + (hooksOn ? "on" : "off"); applySteps(); };
+    $("#dev-drawer").onclick = function () { $("#fake-drawer").hidden = false; };
+    $("#drawer-close").onclick = function () { $("#fake-drawer").hidden = true; };
+    $("#dev-theme").onclick = function () {
+      var t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t); // not persisted: the harness must not change the app's saved theme
+    };
+    $("#btn-export").onclick = function () { log("export clicked"); };
+
+    // First run, the way the app will call it once results are on screen. ?notour skips it.
+    if (!/[?&]notour\b/.test(location.search)) log("first run -> " + TallyTour.maybeStartFirstRun());
+  })();
+</script>
+</body>
+</html>

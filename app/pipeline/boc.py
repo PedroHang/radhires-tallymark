@@ -1,7 +1,7 @@
 """Bill of Characteristics input: parse, validate, normalize.
 
-The column schema is ours. Extraction tools export BoC/results to Excel, but
-its real column names are not public, so common aliases are accepted.
+The column schema is ours. Extraction tools export BoC/results to Excel with their own
+column names, so common aliases are accepted.
 """
 from __future__ import annotations
 

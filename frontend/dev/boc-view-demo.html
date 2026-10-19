@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoC View Harness</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../boc-view.css">
+<style>
+  /* Harness styles only. Uses its own --h-* names on purpose so the panel runs on its fallbacks. */
+  :root { --h-bg: #f4f5f8; --h-card: #fff; --h-ink: #1a1f2b; --h-ink-2: #5b6472; --h-line: #e3e6ec; --h-accent: #2a5bd7; color-scheme: light; }
+  [data-theme="dark"] { --h-bg: #0f131a; --h-card: #161b24; --h-ink: #e6e9ef; --h-ink-2: #a3abb9; --h-line: #2b3240; --h-accent: #7aa2ff; color-scheme: dark; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --h-bg: #0f131a; --h-card: #161b24; --h-ink: #e6e9ef; --h-ink-2: #a3abb9; --h-line: #2b3240; --h-accent: #7aa2ff; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; color: var(--h-ink-2); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; background: var(--h-card); border: 1px solid var(--h-line); border-radius: 12px; }
+  select, button, input { font: inherit; height: 34px; padding: 0 10px; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-card); color: var(--h-ink); }
+  select { max-width: 100%; }
+  button { cursor: pointer; }
+  button.primary { background: var(--h-accent); border-color: var(--h-accent); color: #fff; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--h-card); border: 1px solid var(--h-line); border-radius: 12px; padding: 12px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--h-ink-2); margin: 0 0 8px; }
+  .sheet { position: relative; background: #fff; border-radius: 6px; overflow: hidden; }
+  .sheet img { display: block; width: 100%; height: auto; }
+  .sheet .box { position: absolute; border: 2px solid #e5484d; background: rgba(229, 72, 77, .12); border-radius: 2px; box-shadow: 0 0 0 4px rgba(229, 72, 77, .18); transition: all .2s; }
+  .empty { color: var(--h-ink-2); padding: 24px 0; text-align: center; }
+  #log { margin: 0; padding: 0; list-style: none; font: 12.5px/1.5 ui-monospace, Consolas, monospace; max-height: 420px; overflow: auto; }
+  #log li { padding: 6px 0; border-bottom: 1px solid var(--h-line); word-break: break-all; }
+  .muted { color: var(--h-ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>BoC View harness</h1>
+  <p class="lead">Dev page for <code>frontend/boc-view.js</code>. Pick a completed run, open the panel, click rows: the callback payload is logged and the box is drawn on the sheet.</p>
+
+  <div class="bar">
+    <label for="run" class="muted">Run</label>
+    <select id="run"><option value="">Loading runs…</option></select>
+    <button id="refresh" type="button">Reload runs</button>
+    <button id="sample" type="button" title="GET /samples, then POST /runs with use_llm=false">New sample run</button>
+    <button id="bogus" type="button" title="Opens the panel on a run id that does not exist">Open missing run</button>
+    <label for="theme" class="muted">Theme</label>
+    <select id="theme">
+      <option value="system">System</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+    <label class="muted"><input type="checkbox" id="col" style="height:auto"> close on locate</label>
+    <button id="open" class="primary" type="button">View BoC</button>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2 id="sheet-title">Sheet</h2>
+      <div id="sheet" class="sheet"><div class="empty">Click a BoC row to show its location here.</div></div>
+    </section>
+    <section class="card">
+      <h2>onLocate calls</h2>
+      <ul id="log"><li class="muted">None yet.</li></ul>
+    </section>
+  </div>
+</main>
+
+<script src="../boc-view.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var runSel = $("run"), themeSel = $("theme"), log = $("log");
+  window.__locateLog = [];
+
+  function applyTheme(v) {
+    if (v === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", v);
+  }
+  themeSel.addEventListener("change", function () { applyTheme(themeSel.value); });
+
+  async function loadRuns(select) {
+    var runs = await fetch("/runs").then(function (r) { return r.json(); });
+    runSel.textContent = "";
+    runs.forEach(function (r) {
+      var o = document.createElement("option");
+      o.value = r.run_id;
+      o.textContent = r.run_id + " · " + r.status + " · " + (r.boc && r.boc.filename) + (r.stats && r.stats.flags != null ? " · " + r.stats.flags + " flags" : "");
+      runSel.appendChild(o);
+    });
+    if (!runs.length) runSel.innerHTML = '<option value="">No runs yet: click "New sample run"</option>';
+    var params = new URLSearchParams(location.search);
+    var want = select || params.get("run");
+    if (want) runSel.value = want;
+  }
+
+  function onLocate(p) {
+    window.__locateLog.push(p);
+    if (log.firstElementChild && log.firstElementChild.classList.contains("muted")) log.textContent = "";
+    var li = document.createElement("li");
+    li.textContent = JSON.stringify(p);
+    log.insertBefore(li, log.firstChild);
+    var sheet = $("sheet");
+    $("sheet-title").textContent = "Sheet " + p.sheet + " · CN " + p.char_no + (p.bbox ? "" : " · no location");
+    sheet.textContent = "";
+    var img = document.createElement("img");
+    img.alt = "Sheet " + p.sheet;
+    img.src = "/runs/" + encodeURIComponent(runSel.value) + "/sheets/" + p.sheet + ".png";
+    sheet.appendChild(img);
+    if (p.bbox) {
+      var b = document.createElement("div");
+      b.className = "box";
+      b.style.left = (p.bbox.x * 100) + "%";
+      b.style.top = (p.bbox.y * 100) + "%";
+      b.style.width = (p.bbox.w * 100) + "%";
+      b.style.height = (p.bbox.h * 100) + "%";
+      sheet.appendChild(b);
+    }
+  }
+
+  function openPanel(runId) {
+    window.TallyBocView.open({ runId: runId, onLocate: onLocate, closeOnLocate: $("col").checked ? true : "auto" });
+  }
+
+  $("open").addEventListener("click", function () { if (runSel.value) openPanel(runSel.value); });
+  $("bogus").addEventListener("click", function () { openPanel("run_does_not_exist"); });
+  $("refresh").addEventListener("click", function () { loadRuns(); });
+  $("sample").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true; btn.textContent = "Starting…";
+    try {
+      var s = await fetch("/samples").then(function (r) { return r.json(); });
+      var fd = new FormData();
+      fd.append("drawing_upload_id", s.drawing.upload_id);
+      fd.append("boc_upload_id", s.boc.upload_id);
+      fd.append("use_llm", "false");
+      var res = await fetch("/runs", { method: "POST", body: fd }).then(function (r) { return r.json(); });
+      await loadRuns(res.run_id);
+      openPanel(res.run_id); // shows the "not finished yet" state while it runs
+    } finally {
+      btn.disabled = false; btn.textContent = "New sample run";
+    }
+  });
+
+  loadRuns();
+})();
+</script>
+</body>
+</html>

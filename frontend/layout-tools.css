@@ -1,0 +1,145 @@
+/* Tallymark layout tools: resize handles + interface size control.
+ * Theme-aware through the app's tokens when present, with standalone fallbacks.
+ * Dark mode: [data-theme="dark"] on <html>, or the system preference unless data-theme="light". */
+
+:root {
+  --tally-ui-zoom: 1;
+  --tl-surface: var(--surface, var(--panel, #fff));
+  --tl-ink: var(--ink, #1a1f2b);
+  --tl-ink-2: var(--ink-2, #5b6675);
+  --tl-line: var(--line, var(--border, #e3e6ec));
+  --tl-accent: var(--accent, #2f5d8a);
+  --tl-hover: color-mix(in srgb, var(--tl-ink) 7%, transparent);
+  --tl-radius: var(--radius, 10px);
+  --tl-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+}
+:root[data-theme="dark"] {
+  --tl-surface: var(--surface, var(--panel, #1b2029));
+  --tl-ink: var(--ink, #e7eaf0);
+  --tl-ink-2: var(--ink-2, #a3acb9);
+  --tl-line: var(--line, var(--border, #2f3642));
+  --tl-accent: var(--accent, #7aa7d6);
+  --tl-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tl-surface: var(--surface, var(--panel, #1b2029));
+    --tl-ink: var(--ink, #e7eaf0);
+    --tl-ink-2: var(--ink-2, #a3acb9);
+    --tl-line: var(--line, var(--border, #2f3642));
+    --tl-accent: var(--accent, #7aa7d6);
+    --tl-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+
+/* ------------------------------------------------------------------ interface scale hooks */
+
+/* Cancel the UI zoom inside an element whose script mixes getBoundingClientRect() with style px
+ * (the drawing viewport). Its effective zoom becomes 1. */
+[data-ui-scale-exempt] { zoom: calc(1 / var(--tally-ui-zoom, 1)); }
+
+/* 100vh is multiplied by zoom; a full-viewport shell carries this attribute (or uses height: 100%). */
+[data-ui-scale-fill] { height: calc(100vh / var(--tally-ui-zoom, 1)) !important; }
+
+/* ------------------------------------------------------------------ resize handle */
+
+/* Zero-width flex item between the pane and the center column; the hit area and the grip are
+ * pseudo-elements, so the handle never takes layout space and is never clipped by the pane's
+ * own overflow:auto. */
+.tl-handle {
+  position: relative;
+  flex: 0 0 0px;
+  width: 0;
+  align-self: stretch;
+  z-index: 20;
+  outline: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tl-handle[hidden] { display: none; }
+.tl-handle::before { /* invisible 12px hit area: 8px over the pane, only 4px over the canvas */
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -8px;
+  width: 12px;
+  cursor: col-resize;
+}
+.tl-handle-right::before { left: -4px; }
+.tl-handle::after { /* the visible line + grip */
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -1px;
+  width: 2px;
+  background: var(--tl-accent);
+  opacity: 0;
+  transition: opacity .12s ease;
+  pointer-events: none;
+}
+.tl-handle:hover::after,
+.tl-handle.tl-active::after,
+.tl-handle:focus-visible::after { opacity: .55; }
+.tl-handle.tl-active::after,
+.tl-handle:focus-visible::after { opacity: 1; }
+.tl-handle:focus-visible::before {
+  background: color-mix(in srgb, var(--tl-accent) 16%, transparent);
+  border-radius: 6px;
+}
+/* while dragging: col-resize everywhere, no text selection, no iframe/canvas stealing events */
+html.tl-resizing, html.tl-resizing * { cursor: col-resize !important; -webkit-user-select: none !important; user-select: none !important; }
+
+@media (hover: none) and (pointer: coarse) {
+  .tl-handle::before { left: -14px; width: 22px; } /* bigger target for fingers */
+  .tl-handle-right::before { left: -8px; }
+  .tl-handle::after { opacity: .35; }
+}
+
+/* ------------------------------------------------------------------ interface size control */
+
+.tl-scale {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  border: 1px solid var(--tl-line);
+  border-radius: var(--tl-radius);
+  background: var(--tl-surface);
+  box-shadow: var(--tl-shadow);
+  overflow: hidden;
+  font: 500 12px/1 var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif);
+  color: var(--tl-ink);
+  vertical-align: middle;
+}
+.tl-scale button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color .12s ease, color .12s ease;
+}
+.tl-scale button:hover:not(:disabled) { background: var(--tl-hover); }
+.tl-scale button:focus-visible { outline: 2px solid var(--tl-accent); outline-offset: -2px; border-radius: calc(var(--tl-radius) - 3px); }
+.tl-scale button:disabled { opacity: .35; cursor: default; }
+.tl-scale-btn { width: 30px; gap: 1px; font-weight: 600; }
+.tl-scale-dec > span:first-child { font-size: 11px; }
+.tl-scale-inc > span:first-child { font-size: 14px; }
+.tl-scale-sign { font-size: 11px; color: var(--tl-ink-2); transform: translateY(-1px); }
+.tl-scale-pct {
+  min-width: 48px;
+  padding: 0 6px;
+  border-left: 1px solid var(--tl-line) !important;
+  border-right: 1px solid var(--tl-line) !important;
+  font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace) !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--tl-accent) !important;
+}
+.tl-scale-pct.tl-is-default { color: var(--tl-ink-2) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-handle::after, .tl-scale button { transition: none; }
+}

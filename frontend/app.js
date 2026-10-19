@@ -19,8 +19,15 @@ const RULE_PRESETS = ["Reference dimension", "Title-block tolerance", "Basic dim
 const SHORTCUTS = [
   ["J / K", "Next / previous flag"], ["C", "Confirm miss"], ["E", "Excluded by customer rule"], ["D", "Dismiss"],
   ["Ctrl+Z", "Undo last disposition"], ["F", "Fit sheet"], ["+ / -", "Zoom"], ["O", "Toggle Faded / Original"],
-  ["1 / 2 / 3", "Go to sheet"], ["U / P / A", "Filter Unaccounted / Places / All"], ["Ctrl+E", "Export exceptions"], ["?", "Shortcut help"],
+  ["1 / 2 / 3", "Go to sheet"], ["U / P / A", "Filter Unaccounted / Places / All"], ["B", "View the BoC"], ["Ctrl+E", "Export exceptions"],
+  ["Ctrl+Alt+= / -", "Interface size"], ["?", "Shortcut help"],
 ];
+const DISP_SHORT = { open: "Open", confirmed: "Confirmed miss", excluded: "Excluded", dismissed: "Dismissed" };
+// UI zoom factor from layout-tools.js (1 when the module is missing). getBoundingClientRect() returns zoomed px,
+// style.left/top on a fixed element take local px, so anything that copies one into the other goes through these.
+const uiFactor = () => window.TallyLayout?.uiScale?.factor?.() || 1;
+const localRect = (el) => window.TallyLayout?.uiScale?.localRect?.(el) || el.getBoundingClientRect();
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const STAGE_NAMES = ["Rendering sheets", "Reading text regions", "Matching to BoC rows", "Applying exclusions", "Classifying leftovers", "Checking repeated features"];
 
 const state = {
@@ -41,6 +48,13 @@ const state = {
   filter: "all",
   selected: null,
   view: { s: 1, tx: 0, ty: 0, W: 0, H: 0 },
+  locate: null, // a BoC row or covered region picked for display: { sheet, bbox, poly?, label, kind }
+  panel: "flags", // right column tab: "flags" | "covered"
+  coveredItems: [],
+  coveredSel: null,
+  coveredQuery: "",
+  showCovered: false,
+  dragMoved: false,
   undo: [],
   exportPulsed: false,
   skipSheets: [],
@@ -61,8 +75,11 @@ function show(screen) {
   $("#screen-results").hidden = screen !== "results";
   const results = screen === "results";
   $("#btn-export").hidden = !results;
-  $("#btn-rerun").hidden = !results;
+  $("#tb-run-actions").hidden = !results;
   $("#btn-cancel").hidden = screen !== "processing";
+  document.body.dataset.screen = screen;
+  if (!results) window.TallyBocView?.close();
+  closeHelpMenu();
   const fname = state.files.drawing?.filename;
   $("#crumb").hidden = !(fname && screen !== "load");
   $("#crumb-file").textContent = fname || "";
@@ -199,8 +216,10 @@ async function startRun(force = false) {
   fd.append("skip_sheets", JSON.stringify(state.skipSheets));
   if (b.simulated) fd.append("simulated", "true");
   try {
-    const { run_id } = await api("/runs", { method: "POST", body: fd });
-    state.runId = run_id;
+    const res = await api("/runs", { method: "POST", body: fd });
+    state.runId = res.run_id;
+    // A host that runs the check synchronously (serverless) answers with the finished run: go straight to results.
+    if (isFinished(res.status)) { clearTimeout(procTimer); await loadResults(); return; }
     beginProcessing();
   } catch (e) {
     toast(e.message);
@@ -209,6 +228,7 @@ async function startRun(force = false) {
 
 /* ------------------------------------------------------------------ processing */
 let procTimer = null;
+const isFinished = (status) => status === "complete" || status === "done";
 
 function beginProcessing() {
   show("processing");
@@ -227,7 +247,7 @@ function beginProcessing() {
   const MIN_MS = reducedMotion ? 0 : 420;
   const tick = async () => {
     let doc;
-    try { doc = await api(`/runs/${state.runId}`); } catch (e) { procTimer = setTimeout(tick, 400); return; }
+    try { doc = await api(`/runs/${state.runId}`); } catch (e) { procTimer = setTimeout(tick, 1000); return; }
     if (state.screen !== "processing" || doc.run_id !== state.runId) return;
     state.run = doc;
     const now = performance.now();
@@ -237,15 +257,16 @@ function beginProcessing() {
       sheetsLoaded = true;
       const sheets = doc.sheets_checked || [1];
       $("#proc-sheet").innerHTML = `<img alt="Sheet ${sheets[0]} being checked" src="/runs/${doc.run_id}/sheets/${sheets[0]}.png">`;
-      $("#proc-thumbs").innerHTML = sheets.map((n, i) => `<div class="thumb ${i === 0 ? "active" : ""}"><img alt="" src="/runs/${doc.run_id}/sheets/${n}.png"><div class="thumb-foot"><span>Sheet ${n}</span></div></div>`).join("");
+      $("#proc-thumbs").innerHTML = sheets.map((n, i) => `<div class="thumb ${i === 0 ? "active" : ""}"><span class="thumb-img"><img alt="" src="/runs/${doc.run_id}/sheets/${n}.png"></span><span class="thumb-foot"><span class="thumb-name">Sheet ${n}</span></span></div>`).join("");
     }
     renderStages(doc, shown);
     if (doc.status === "error") return showProcError(doc);
-    if (doc.status === "complete" && shown >= 6) {
+    if (isFinished(doc.status) && shown >= 6) {
       setTimeout(loadResults, MIN_MS / 2);
       return;
     }
-    procTimer = setTimeout(tick, 120);
+    // Poll the run document: quickly while finished stages are still being revealed, once a second otherwise.
+    procTimer = setTimeout(tick, shown < doneCount || isFinished(doc.status) ? 120 : 1000);
   };
   renderStages({ stages: STAGE_NAMES.map((n) => ({ name: n, status: "pending" })) }, 0);
   clearTimeout(procTimer);
@@ -255,14 +276,15 @@ function beginProcessing() {
 function renderStages(doc, shown) {
   const firstPending = shown;
   $("#stages").innerHTML = doc.stages.map((s, i) => {
-    let cls = "pending", mark = "·", count = "";
-    if (i < shown) { cls = "done"; mark = "✓"; count = s.count ?? ""; }
-    else if (s.status === "error") { cls = "error"; mark = "×"; count = s.detail ?? ""; }
-    else if (i === firstPending && doc.status !== "error") { cls = "running"; mark = "›"; count = s.status === "running" ? (s.detail ?? "") : ""; }
-    return `<li class="${cls}"><span class="mark">${mark}</span><span>${esc(s.name)}</span><span class="count">${esc(count)}</span></li>`;
+    let cls = "pending", mark = "", count = "";
+    if (i < shown) { cls = "done"; mark = icon("check"); count = s.count ?? ""; }
+    else if (s.status === "error") { cls = "error"; mark = icon("x"); count = s.detail ?? ""; }
+    else if (i === firstPending && doc.status !== "error") { cls = "running"; count = s.status === "running" ? (s.detail ?? "") : ""; }
+    return `<li class="${cls}"><span class="mark" aria-hidden="true">${mark}</span><span class="st-name">${esc(s.name)}</span><span class="count">${esc(count)}</span></li>`;
   }).join("");
   const pct = Math.round((shown / 6) * 100);
   $("#progress-bar").style.width = `${pct}%`;
+  $("#progress").setAttribute("aria-valuenow", String(pct));
   $("#progress-pct").textContent = `${pct}%`;
 }
 
@@ -292,11 +314,19 @@ async function loadResults() {
   state.undo = [];
   state.filter = "all";
   state.selected = null;
+  state.locate = null;
+  state.coveredSel = null;
+  state.coveredQuery = "";
   state.exportPulsed = false;
   state.faded = true;
   const sheets = doc.sheets_checked || [1];
   state.sheet = flags[0]?.sheet || sheets[0];
+  await loadCoverageAll();
   show("results");
+  $("#covered-search").value = "";
+  renderTabs();
+  setPanel("flags");
+  setShowCovered(false);
   renderSummary();
   renderBanners();
   renderThumbs();
@@ -304,6 +334,8 @@ async function loadResults() {
   renderList();
   renderDetail();
   await setSheet(state.sheet, { fit: true });
+  // First visit only: the tour waits for its anchors itself; give the layout a frame to settle first.
+  requestAnimationFrame(() => setTimeout(() => window.TallyTour?.maybeStartFirstRun?.(), 250));
 }
 
 function counts() {
@@ -324,19 +356,35 @@ function renderSummary() {
   const covered = st.covered || 0;
   const left = c.live;
   const denom = Math.max(1, covered + left);
+  const pctCovered = Math.round((covered / denom) * 100);
   const allReviewed = c.total > 0 && c.open === 0;
+  const revPct = c.total ? Math.round((c.reviewed / c.total) * 100) : 100;
   $("#summary").innerHTML = `
-    <div class="big"><div class="big-num ${left === 0 ? "zero" : ""}">${left}</div><div class="big-label">unaccounted</div></div>
-    <div class="cov" aria-label="${covered} covered regions, ${left} left">
+    <div class="sum-hero">
+      <div class="big-num ${left === 0 ? "zero" : ""}">${left}</div>
+      <div class="big-text"><div class="big-label">unaccounted</div><div class="big-sub">${left === 0 ? "every requirement has a row" : `requirement${left === 1 ? "" : "s"} no BoC row covers`}</div></div>
+    </div>
+    <div class="cov" aria-label="${covered} covered text regions, ${left} left, ${pctCovered} percent covered">
+      <div class="cov-head"><span>Requirement text on the drawing covered by a BoC row</span><b>${pctCovered}%</b></div>
       <div class="cov-bar"><div class="c" style="width:${(covered / denom) * 100}%"></div><div class="l" style="width:${(left / denom) * 100}%"></div></div>
-      <div class="cov-legend"><span>covered ${covered}</span><span>left ${left}</span></div>
+      <div class="cov-legend">
+        <button class="cov-link" id="sum-covered" title="List the covered text regions and outline them on the drawing"><i class="sw sw-c"></i><b>${covered}</b> text regions covered${icon("chev-r")}</button>
+        <span><i class="sw sw-l"></i><b>${left}</b> left uncovered</span>
+        <span class="notices-slot" id="notices-slot"></span>
+      </div>
     </div>
-    <div class="stats">
-      <div><b>${state.run.boc.rows}</b> rows extracted</div>
-      <div title="Every text region read on the drawing, excluding the title block, border and your exclusions."><b>${st.text_regions ?? 0}</b> text regions checked</div>
-      <div><b>${c.u}</b> U · <b>${c.p}</b> P</div>
+    <div class="stat-chips">
+      <div class="stat"><b>${state.run.boc.rows}</b><span>BoC rows</span></div>
+      <div class="stat" title="Every text region read on the drawing, excluding the title block, border and your exclusions."><b>${st.text_regions ?? 0}</b><span>text regions checked</span></div>
+      <div class="stat stat-u" title="U: a requirement on the drawing with no BoC row"><b>${c.u}</b><span><i class="mini-u">U</i>no row</span></div>
+      <div class="stat stat-p" title="P: a 4X style callout whose row records fewer places"><b>${c.p}</b><span><i class="mini-p">P</i>places short</span></div>
     </div>
-    <div class="review ${allReviewed ? "done" : ""}"><span class="dot"></span>${allReviewed ? `All ${c.total} reviewed ✓` : `${c.reviewed} of ${c.total} reviewed`}</div>`;
+    <div class="review ${allReviewed ? "done" : ""}">
+      <div class="review-top">${allReviewed ? `${icon("check")}<span>All ${c.total} reviewed</span>` : `<span><b>${c.reviewed}</b> of ${c.total} reviewed</span>`}</div>
+      <div class="review-bar"><i style="width:${revPct}%"></i></div>
+    </div>`;
+  renderNoticesLink();
+  $("#sum-covered").onclick = () => { setPanel("covered"); setShowCovered(true); $("#covered-search")?.focus({ preventScroll: true }); };
   if (allReviewed && !state.exportPulsed) {
     state.exportPulsed = true;
     const b = $("#btn-export");
@@ -346,33 +394,78 @@ function renderSummary() {
   }
 }
 
-function renderBanners() {
+// Run notices (warnings under the summary). Each can be dismissed; dismissals are kept per run in sessionStorage.
+function noticeStoreKey() { return `tallymark.notices.${state.runId}`; }
+function dismissedNotices() {
+  try { return new Set(JSON.parse(sessionStorage.getItem(noticeStoreKey()) || "[]")); } catch (e) { return new Set(state.noticesHidden || []); }
+}
+function saveDismissedNotices(set) {
+  state.noticesHidden = [...set];
+  try { sessionStorage.setItem(noticeStoreKey(), JSON.stringify([...set])); } catch (e) { /* storage blocked: kept for this page only */ }
+}
+function runNotices() {
   const out = [];
   const st = state.run.stats || {};
   for (const w of state.run.warnings || []) {
-    if (w.type === "no_bbox") out.push(`<div class="banner banner-amber"><span class="banner-i">!</span><span>This BoC has no location columns. Rows were located by matching text, so a few matches may be off.</span></div>`);
-    if (w.type === "rows_not_located") out.push(`<div class="banner banner-amber"><span class="banner-i">!</span><span>${w.char_nos.length} row${w.char_nos.length === 1 ? "" : "s"} could not be placed on the drawing (CN ${esc(w.char_nos.slice(0, 8).join(", "))}${w.char_nos.length > 8 ? ", ..." : ""}). Anything they cover may show as unaccounted.</span></div>`);
-    if (w.type === "sheet_without_rows") out.push(`<div class="banner banner-amber"><span class="banner-i">!</span><span>Sheet ${w.sheet} has no BoC rows, so every requirement on it shows as unaccounted.</span></div>`);
+    if (w.type === "no_bbox") out.push({ key: "no_bbox", tone: "amber", text: "This BoC has no location columns. Rows were located by matching text, so a few matches may be off." });
+    if (w.type === "rows_not_located") out.push({ key: "rows_not_located", tone: "amber", text: `${w.char_nos.length} row${w.char_nos.length === 1 ? "" : "s"} could not be placed on the drawing (CN ${w.char_nos.slice(0, 8).join(", ")}${w.char_nos.length > 8 ? ", ..." : ""}). Anything they cover may show as unaccounted.` });
+    if (w.type === "sheet_without_rows") out.push({ key: `sheet_without_rows:${w.sheet}`, tone: "amber", text: `Sheet ${w.sheet} has no BoC rows, so every requirement on it shows as unaccounted.` });
   }
   const llmMsg = { no_credential: "no API key is set", auth_failed: "the API key was rejected", permission_denied: "the key can't use this model", model_not_found: "the model was not found for this key", rate_limited: "the API rate limited the request", connection_failed: "the model API could not be reached", disabled: "it is turned off" };
   if (st.ambiguous && st.llm_error) {
     const why = llmMsg[st.llm_error] || st.llm_error;
-    out.push(`<div class="banner banner-blue"><span class="banner-i">i</span><span>The model check did not run (${esc(why)}). ${st.ambiguous} ambiguous leftover${st.ambiguous === 1 ? " is" : "s are"} flagged with low confidence for you to review.</span></div>`);
+    out.push({ key: "llm", tone: "blue", text: `The model check did not run (${why}). ${st.ambiguous} ambiguous leftover${st.ambiguous === 1 ? " is" : "s are"} flagged with low confidence for you to review.` });
   }
-  $("#result-banners").innerHTML = out.join("");
+  return out;
+}
+function renderBanners() {
+  const all = runNotices();
+  const hidden = dismissedNotices();
+  const shown = all.filter((n) => !hidden.has(n.key));
+  state.noticesHiddenCount = all.length - shown.length;
+  $("#result-banners").innerHTML = shown.map((n) => `
+    <div class="banner banner-${n.tone} notice" data-key="${esc(n.key)}" role="status">
+      <span class="banner-i" aria-hidden="true">${n.tone === "blue" ? "i" : "!"}</span>
+      <button type="button" class="notice-text" aria-expanded="false" title="${esc(n.text)}">${esc(n.text)}</button>
+      <button type="button" class="notice-x" aria-label="Dismiss this notice" title="Dismiss this notice">${icon("x")}</button>
+    </div>`).join("");
+  $$("#result-banners .notice").forEach((el) => {
+    const txt = $(".notice-text", el);
+    txt.onclick = () => { const on = !el.classList.contains("expanded"); el.classList.toggle("expanded", on); txt.setAttribute("aria-expanded", String(on)); };
+    $(".notice-x", el).onclick = () => {
+      const set = dismissedNotices();
+      set.add(el.dataset.key);
+      saveDismissedNotices(set);
+      renderBanners();
+      requestAnimationFrame(() => { if (!state.selected && !state.locate) fitView(false); });
+    };
+  });
+  renderNoticesLink();
+}
+function renderNoticesLink() {
+  const slot = $("#notices-slot");
+  if (!slot) return;
+  const n = state.noticesHiddenCount || 0;
+  slot.innerHTML = n ? `<button type="button" class="notices-link" id="notices-show">${n} notice${n === 1 ? "" : "s"} hidden · <u>Show</u></button>` : "";
+  if (n) $("#notices-show").onclick = () => { saveDismissedNotices(new Set()); renderBanners(); requestAnimationFrame(() => { if (!state.selected && !state.locate) fitView(false); }); };
 }
 
 function renderThumbs() {
   const sheets = state.run.sheets_checked || [1];
   const byS = (n) => state.flags.filter((f) => f.sheet === n && f.disposition !== "dismissed").length;
+  const openS = (n) => state.flags.filter((f) => f.sheet === n && f.disposition === "open").length;
+  $("#rail-count").textContent = String(sheets.length);
   $("#thumbs").innerHTML = sheets.map((n) => {
-    const k = byS(n);
-    return `<button class="thumb ${n === state.sheet ? "active" : ""}" data-sheet="${n}" aria-label="Sheet ${n}, ${k} flag${k === 1 ? "" : "s"}">
-      <img alt="" loading="lazy" src="/runs/${state.runId}/sheets/${n}.png">
-      <div class="thumb-foot"><span>Sheet ${n}</span><span class="badge ${k ? "hot" : ""}">${k}</span></div></button>`;
+    const k = byS(n), o = openS(n);
+    const pill = k
+      ? `<span class="count-pill ${o ? "hot" : "done"}">${o ? "" : icon("check")}${plural(k, "flag")}</span>`
+      : `<span class="count-pill">No flags</span>`;
+    return `<button class="thumb ${n === state.sheet ? "active" : ""}" data-sheet="${n}" aria-pressed="${n === state.sheet}" aria-label="Sheet ${n}, ${plural(k, "flag")}${k ? `, ${o} open` : ""}">
+      <span class="thumb-img"><img alt="" loading="lazy" src="/runs/${state.runId}/sheets/${n}.png"></span>
+      <span class="thumb-foot"><span class="thumb-name">Sheet ${n}</span>${pill}</span></button>`;
   }).join("");
   $$("#thumbs .thumb").forEach((b) => (b.onclick = () => setSheet(+b.dataset.sheet, { fit: true })));
-  $("#sheet-select").innerHTML = sheets.map((n) => `<option value="${n}" ${n === state.sheet ? "selected" : ""}>Sheet ${n} (${byS(n)})</option>`).join("");
+  $("#sheet-select").innerHTML = sheets.map((n) => `<option value="${n}" ${n === state.sheet ? "selected" : ""}>Sheet ${n} · ${plural(byS(n), "flag")}</option>`).join("");
 }
 
 function visibleFlags() {
@@ -386,8 +479,11 @@ function visibleFlags() {
 
 function renderChips() {
   const c = counts();
-  const chips = [["all", `All ${c.total}`], ["u", `U ${c.u}`], ["p", `P ${c.p}`], ["open", `Open ${c.open}`]];
-  $("#chips").innerHTML = chips.map(([k, l]) => `<button class="chip ${state.filter === k ? "on" : ""}" data-f="${k}" aria-pressed="${state.filter === k}">${l}</button>`).join("");
+  const chips = [["all", "All", c.total, "All flags (A)"], ["u", "", c.u, "Unaccounted: no BoC row (U)"], ["p", "", c.p, "Places short (P)"], ["open", "Open", c.open, "Not reviewed yet"]];
+  $("#chips").innerHTML = chips.map(([k, l, n, t]) => {
+    const lab = k === "u" ? `<i class="mini-u">U</i>No row` : k === "p" ? `<i class="mini-p">P</i>Places` : l;
+    return `<button class="chip ${state.filter === k ? "on" : ""}" data-f="${k}" aria-pressed="${state.filter === k}" title="${t}">${lab}<span class="n">${n}</span></button>`;
+  }).join("");
   $$("#chips .chip").forEach((b) => (b.onclick = () => { state.filter = b.dataset.f; renderChips(); renderList(); }));
 }
 
@@ -405,6 +501,10 @@ function shortText(f) {
   return f.transcription || f.drawing_text || "";
 }
 
+function statusPill(f) {
+  return `<span class="status-pill s-${f.disposition}">${f.disposition === "confirmed" ? icon("check") : ""}${DISP_SHORT[f.disposition]}</span>`;
+}
+
 function renderList() {
   const list = visibleFlags();
   if (!state.flags.length) {
@@ -417,22 +517,105 @@ function renderList() {
     return;
   }
   $("#flag-list").innerHTML = list.map((f) => {
-    const color = flagVar(f);
-    const cls = f.class === "places" ? "Places shortfall" : "Unaccounted requirement";
-    const aria = `${cls}, sheet ${f.sheet} zone ${f.zone}, ${f.title}, ${DISP_LABEL[f.disposition].toLowerCase()}`;
-    return `<div class="flag-row ${state.selected === f.flag_id ? "selected" : ""} ${f.disposition}" role="option" tabindex="0" aria-selected="${state.selected === f.flag_id}" aria-label="${esc(aria)}" data-id="${f.flag_id}" style="border-left-color:${color}">
-      <div class="flag-tag" style="border:1.4px ${f.class === "places" ? "dashed" : "solid"} ${color};color:${color}">${f.class === "places" ? "P" : "U"}</div>
+    const isP = f.class === "places";
+    const cls = isP ? "Places shortfall" : "Unaccounted requirement";
+    const aria = `${f.title}. ${cls}, ${f.flag_id}, sheet ${f.sheet} zone ${f.zone}, ${DISP_LABEL[f.disposition].toLowerCase()}`;
+    const txt = shortText(f);
+    return `<div class="flag-row ${state.selected === f.flag_id ? "selected" : ""} ${f.disposition}" role="option" tabindex="0" aria-selected="${state.selected === f.flag_id}" aria-label="${esc(aria)}" data-id="${f.flag_id}" style="--fc:${flagVar(f)}">
+      <span class="flag-badge ${isP ? "p" : "u"}" aria-hidden="true">${isP ? "P" : "U"}</span>
       <div class="flag-body">
-        <div class="flag-meta"><span class="fid">${f.flag_id}</span><span>Sheet ${f.sheet} · Zone ${f.zone}</span></div>
         <div class="flag-title">${esc(f.title)}</div>
-        <div class="flag-text">${esc(shortText(f))}</div>
-        <div class="flag-disp" style="color:${DISP_COLOR[f.disposition]}">${DISP_LABEL[f.disposition]}${f.disposition === "confirmed" ? " ✓" : ""}${f.disposition_note ? ` · ${esc(f.disposition_note)}` : ""}</div>
+        <div class="flag-meta"><span class="fid">${f.flag_id}</span><span class="sep">·</span><span>Sheet ${f.sheet}</span><span class="sep">·</span><span>Zone ${f.zone}</span></div>
+        ${txt ? `<div class="flag-text" title="Text read on the drawing">${esc(txt)}</div>` : ""}
+        <div class="flag-foot">${statusPill(f)}${f.disposition_note ? `<span class="flag-note">${esc(f.disposition_note)}</span>` : ""}</div>
       </div></div>`;
   }).join("");
   $$("#flag-list .flag-row").forEach((r) => {
     r.onclick = () => selectFlag(r.dataset.id);
     r.onkeydown = (e) => { if (e.key === "Enter") selectFlag(r.dataset.id); };
   });
+}
+
+/* ------------------------------------------------------------------ covered regions (read-only) */
+// Every covered text region of every checked sheet, with the BoC rows that cover it. Built from
+// /runs/{id}/sheets/{n}/coverage.json; ids are "<sheet>-<index>" so they stay stable for a run.
+async function loadCoverageAll() {
+  const sheets = state.run.sheets_checked || [1];
+  await Promise.all(sheets.map(async (n) => {
+    if (state.coverage[n]) return;
+    try { state.coverage[n] = await api(`/runs/${state.runId}/sheets/${n}/coverage.json`); } catch (e) { state.coverage[n] = { covered: [], excluded: [] }; }
+  }));
+  state.coveredItems = sheets.flatMap((n) => (state.coverage[n].covered || []).map((r, i) => {
+    const rows = (r.char_nos || []).map((cn) => state.rows.find((x) => x.char_no === cn && x.sheet === n) || state.rows.find((x) => x.char_no === cn)).filter(Boolean);
+    return { id: `${n}-${i}`, sheet: n, poly: r.poly, bbox: r.bbox, text: r.text || "", char_nos: r.char_nos || [], rows };
+  }));
+}
+
+function coveredTip(item) {
+  return item.rows.length ? `Covered by ${item.rows.map((x) => `CN ${x.char_no}: ${x.requirement}`).join("; ")}` : "Covered by a BoC row";
+}
+
+function setPanel(panel) {
+  state.panel = panel;
+  const cov = panel === "covered";
+  $("#tab-flags").setAttribute("aria-selected", String(!cov));
+  $("#tab-covered").setAttribute("aria-selected", String(cov));
+  $("#tab-flags").tabIndex = cov ? -1 : 0;
+  $("#tab-covered").tabIndex = cov ? 0 : -1;
+  $("#flags-tools").hidden = cov;
+  $("#covered-tools").hidden = !cov;
+  $("#flag-list").hidden = cov;
+  $("#covered-list").hidden = !cov;
+  if (cov) renderCoveredList();
+}
+
+function renderTabs() {
+  $("#tab-flags-n").textContent = String(state.flags.length);
+  $("#tab-covered-n").textContent = String(state.coveredItems.length);
+}
+
+function renderCoveredList() {
+  const q = state.coveredQuery.trim().toLowerCase();
+  const items = state.coveredItems.filter((it) => !q || [it.text, ...it.char_nos.map((c) => `cn ${c}`), ...it.rows.map((r) => r.requirement)].join(" ").toLowerCase().includes(q));
+  const el = $("#covered-list");
+  if (!state.coveredItems.length) { el.innerHTML = `<div class="empty"><p>No text region on the drawing is covered by a BoC row yet.</p></div>`; return; }
+  if (!items.length) { el.innerHTML = `<div class="empty"><p>Nothing covered matches "${esc(state.coveredQuery.trim())}".</p></div>`; return; }
+  const sheets = [...new Set(items.map((it) => it.sheet))];
+  el.innerHTML = sheets.map((n) => {
+    const group = items.filter((it) => it.sheet === n);
+    return `<div class="cov-group"><div class="cov-group-h">Sheet ${n}<span>${group.length} covered</span></div>${group.map((it) => {
+      const req = it.rows.map((r) => r.requirement).join(" | ") || it.text;
+      const zone = it.rows[0]?.zone;
+      const cns = it.char_nos.length ? it.char_nos.map((c) => `CN ${esc(c)}`).join(", ") : "CN ?";
+      return `<button class="cov-row ${state.coveredSel === it.id ? "selected" : ""}" data-cid="${it.id}" aria-pressed="${state.coveredSel === it.id}" title="Show on the drawing">
+        <span class="cov-cn">${cns}</span>
+        <span class="cov-body"><span class="cov-req">${esc(req)}</span>
+          <span class="cov-meta">Sheet ${it.sheet}${zone ? ` · Zone ${esc(zone)}` : ""}</span>
+          <span class="cov-ocr"><span class="ocr-k">OCR</span>${esc(it.text)}</span></span></button>`;
+    }).join("")}</div>`;
+  }).join("");
+  $$("#covered-list .cov-row").forEach((b) => (b.onclick = () => selectCovered(b.dataset.cid)));
+}
+
+async function selectCovered(id, { fromCanvas = false } = {}) {
+  const it = state.coveredItems.find((x) => x.id === id);
+  if (!it) return;
+  state.coveredSel = id;
+  state.selected = null;
+  state.locate = { sheet: it.sheet, poly: it.poly, bbox: it.bbox, kind: "covered", label: it.char_nos.length ? `CN ${it.char_nos.join(", ")}` : "Covered" };
+  if (state.panel !== "covered") setPanel("covered"); else renderCoveredList();
+  if (it.sheet !== state.sheet) await setSheet(it.sheet);
+  renderList();
+  renderDetail();
+  renderOverlay();
+  requestAnimationFrame(() => zoomToBox(it.bbox));
+  $(`#covered-list .cov-row[data-cid="${id}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
+function setShowCovered(on) {
+  state.showCovered = on;
+  $("#tb-covered").setAttribute("aria-pressed", String(on));
+  renderOverlay();
 }
 
 /* ------------------------------------------------------------------ canvas */
@@ -455,14 +638,20 @@ async function setSheet(n, { fit = false } = {}) {
   if (!state.coverage[n]) {
     try { state.coverage[n] = await api(`/runs/${state.runId}/sheets/${n}/coverage.json`); } catch (e) { state.coverage[n] = { covered: [], excluded: [] }; }
   }
-  $$("#thumbs .thumb").forEach((t) => t.classList.toggle("active", +t.dataset.sheet === n));
+  $$("#thumbs .thumb").forEach((t) => { const on = +t.dataset.sheet === n; t.classList.toggle("active", on); t.setAttribute("aria-pressed", String(on)); });
   $("#sheet-select").value = String(n);
-  const total = (state.run.sheets_checked || [1]).length;
   if (fit) fitView(false);
   renderOverlay();
-  $("#tb-page").textContent = `Sheet ${n}/${state.run.drawing.sheets || total} · ${Math.round(state.view.s * 100)}%`;
+  updateViewLabels();
 }
 
+function updateViewLabels() {
+  const total = state.run.drawing.sheets || (state.run.sheets_checked || [1]).length;
+  $("#tb-page").textContent = `Sheet ${state.sheet} of ${total}`;
+  $("#tb-zoom").textContent = `${Math.round(state.view.s * 100)}%`;
+}
+
+// The viewport carries data-ui-scale-exempt, so inside it visual px == local px and these rects can be used as is.
 function layoutBase() {
   const vp = $("#viewport").getBoundingClientRect();
   const pad = 18;
@@ -483,12 +672,12 @@ function applyView(animate) {
   stage.classList.toggle("animate", !!animate && !reducedMotion);
   const { s, tx, ty } = state.view;
   stage.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
-  $("#tags").style.setProperty("--inv", 1 / s);
   $$("#tags .tag").forEach((t) => (t.style.transform = `scale(${1 / s})`));
-  $("#tb-page").textContent = `Sheet ${state.sheet}/${state.run.drawing.sheets || 1} · ${Math.round(s * 100)}%`;
+  updateViewLabels();
 }
 
 function fitView(animate = true) {
+  if (state.screen !== "results" || !state.run) return;
   const { vw, vh, W, H } = layoutBase();
   state.view.s = 1;
   state.view.tx = (vw - W) / 2;
@@ -507,39 +696,56 @@ function zoomBy(factor) {
   applyView(true);
 }
 
-function zoomToFlag(f) {
+// Centre a normalized box (0-1 page coords) in the part of the viewport that is not under the BoC panel.
+function zoomToBox(b) {
+  if (!b) return;
   const { vw, vh, W, H } = layoutBase();
-  const b = f.bbox;
+  let left = 0, right = vw;
+  const panel = window.TallyBocView?.isOpen?.() && document.querySelector(".tbv-panel");
+  if (panel) {
+    const vr = $("#viewport").getBoundingClientRect(), pr = panel.getBoundingClientRect();
+    if (pr.left > vr.left + 160 && pr.left < vr.right) right = pr.left - vr.left - 12;
+  }
+  const avail = right - left;
   const padW = b.w * W * 1.6 + 40, padH = b.h * H * 1.6 + 40;
-  const s = Math.min(4, Math.max(1, Math.min(vw / padW, vh / padH)));
+  const s = Math.min(4, Math.max(1, Math.min(avail / padW, vh / padH)));
   const cx = (b.x + b.w / 2) * W, cy = (b.y + b.h / 2) * H;
   state.view.s = s;
-  state.view.tx = vw / 2 - s * cx;
+  state.view.tx = left + avail / 2 - s * cx;
   state.view.ty = vh / 2 - s * cy;
   applyView(true);
 }
+function zoomToFlag(f) { zoomToBox(f.bbox); }
 
 function polyPoints(poly, W, H) {
   return poly.map(([x, y]) => `${(x * W).toFixed(1)},${(y * H).toFixed(1)}`).join(" ");
 }
+function boxPoly(b) { return [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]]; }
+
+const COVER_HEX = "#0E8C7F";   // covered outlines on the white drawing paper
+const LOCATE_HEX = "#2F5D8A";  // a BoC row picked in the BoC viewer
 
 function renderOverlay() {
   const W = 1000, H = 1000 * (state.view.aspect || 612 / 792);
   const svg = $("#overlay");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("preserveAspectRatio", "none");
-  const cov = state.coverage[state.sheet] || { covered: [] };
+  const covItems = state.coveredItems.filter((it) => it.sheet === state.sheet);
   const flags = state.flags.filter((f) => f.sheet === state.sheet);
   const lit = flags.filter((f) => f.disposition !== "dismissed");
-  const holes = lit.map((f) => `<polygon points="${polyPoints(expandPoly(f.poly, 0.004), W, H)}" fill="black"/>`).join("");
+  const loc = state.locate && state.locate.sheet === state.sheet ? state.locate : null;
+  const locPoly = loc ? (loc.poly || (loc.bbox ? boxPoly(loc.bbox) : null)) : null;
+  const litPolys = lit.map((f) => expandPoly(f.poly, 0.004));
+  if (locPoly) litPolys.push(expandPoly(locPoly, 0.004));
+  const holes = litPolys.map((p) => `<polygon points="${polyPoints(p, W, H)}" fill="black"/>`).join("");
   const veil = state.faded
     ? `<defs><mask id="veil-mask"><rect x="0" y="0" width="${W}" height="${H}" fill="white"/>${holes}</mask></defs>
        <rect x="0" y="0" width="${W}" height="${H}" fill="#fff" fill-opacity="0.72" mask="url(#veil-mask)"/>`
     : "";
-  const covered = state.faded ? cov.covered.map((r, i) => {
-    const rows = r.char_nos.map((cn) => state.rows.find((x) => x.char_no === cn)).filter(Boolean);
-    const tip = rows.length ? `Covered by ${rows.map((x) => `CN ${x.char_no}: ${x.requirement}`).join("; ")}` : "Covered";
-    return `<polygon class="covered-shape" data-tip="${esc(tip)}" points="${polyPoints(r.poly, W, H)}" vector-effect="non-scaling-stroke" stroke-width="1"/>`;
+  const showCov = state.showCovered;
+  const covered = (state.faded || showCov) ? covItems.map((it) => {
+    const sel = state.coveredSel === it.id;
+    return `<polygon class="covered-shape ${showCov ? "on" : ""} ${sel ? "selected" : ""}" data-cid="${it.id}" data-tip="${esc(coveredTip(it))}" points="${polyPoints(it.poly, W, H)}" vector-effect="non-scaling-stroke" stroke-width="${showCov ? 1.6 : 1}"/>`;
   }).join("") : "";
   const shapes = flags.map((f) => {
     const color = flagColor(f);
@@ -551,25 +757,42 @@ function renderOverlay() {
       points="${polyPoints(expandPoly(f.poly, 0.004), W, H)}" fill="${fill}" fill-opacity="${f.disposition === "dismissed" ? 0.08 : 0.12}"
       stroke="${color}" stroke-width="${width}" stroke-dasharray="${dash}" vector-effect="non-scaling-stroke"/>`;
   }).join("");
+  const locShape = locPoly
+    ? `<polygon class="locate-shape ${loc.kind}" points="${polyPoints(expandPoly(locPoly, 0.006), W, H)}" fill="none" stroke="${loc.kind === "covered" ? COVER_HEX : LOCATE_HEX}" stroke-width="3" vector-effect="non-scaling-stroke"/>`
+    : "";
   // under the veil the drawing is desaturated; flagged ink is re-drawn at full colour through the holes
-  const clip = state.faded && lit.length
-    ? `<defs><clipPath id="lit-clip">${lit.map((f) => `<polygon points="${polyPoints(expandPoly(f.poly, 0.004), W, H)}"/>`).join("")}</clipPath></defs>
+  const clip = state.faded && litPolys.length
+    ? `<defs><clipPath id="lit-clip">${litPolys.map((p) => `<polygon points="${polyPoints(p, W, H)}"/>`).join("")}</clipPath></defs>
        <image href="/runs/${state.runId}/sheets/${state.sheet}.png" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none" clip-path="url(#lit-clip)"/>`
     : "";
-  svg.innerHTML = `<g>${veil}</g><g>${clip}</g><g>${covered}</g><g>${shapes}</g>`;
+  svg.innerHTML = `<g>${veil}</g><g>${clip}</g><g>${covered}</g><g>${shapes}</g><g>${locShape}</g>`;
   // grayscale the drawing only while faded, so lit flags keep their ink colour via the hole in the veil
   const img = $("#stage img.sheet-img");
   if (img) img.style.filter = state.faded ? "saturate(0.35)" : "none";
 
-  $("#tags").innerHTML = flags.map((f) => {
-    const x = Math.min(...f.poly.map((p) => p[0])), y = Math.min(...f.poly.map((p) => p[1]));
+  const inv = `scale(${1 / state.view.s})`;
+  const topLeft = (poly) => [Math.min(...poly.map((p) => p[0])), Math.min(...poly.map((p) => p[1]))];
+  const covTags = showCov ? covItems.map((it) => {
+    const [x, y] = topLeft(it.poly);
+    const label = it.char_nos.length ? `CN ${it.char_nos.join(",")}` : "CN";
+    return `<span class="tag cvtag ${state.coveredSel === it.id ? "on" : ""}" data-cid="${it.id}" style="left:${x * 100}%;top:calc(${y * 100}% - 15px);transform:${inv}">${esc(label)}</span>`;
+  }).join("") : "";
+  const flagTags = flags.map((f) => {
+    const [x, y] = topLeft(f.poly);
     const kind = f.disposition !== "open" ? f.disposition : f.class === "places" ? "p" : "u";
-    return `<span class="tag ${kind}" data-id="${f.flag_id}" style="left:${x * 100}%;top:calc(${y * 100}% - 17px);transform:scale(${1 / state.view.s})">${f.flag_id}</span>`;
+    return `<span class="tag ${kind}" data-id="${f.flag_id}" style="left:${x * 100}%;top:calc(${y * 100}% - 17px);transform:${inv}">${f.flag_id}</span>`;
   }).join("");
-  $$("#tags .tag").forEach((t) => (t.onclick = (e) => { e.stopPropagation(); selectFlag(t.dataset.id); }));
-  $$("#overlay .flag-shape").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); selectFlag(p.dataset.id); }));
+  const locTag = loc && loc.kind === "row" && locPoly
+    ? (() => { const [x, y] = topLeft(locPoly); return `<span class="tag loc" style="left:${x * 100}%;top:calc(${y * 100}% - 17px);transform:${inv}">${esc(loc.label)}</span>`; })()
+    : "";
+  $("#tags").innerHTML = covTags + flagTags + locTag;
+  $$("#tags .tag[data-id]").forEach((t) => (t.onclick = (e) => { e.stopPropagation(); selectFlag(t.dataset.id); }));
+  $$("#tags .tag[data-cid]").forEach((t) => (t.onclick = (e) => { e.stopPropagation(); selectCovered(t.dataset.cid, { fromCanvas: true }); }));
+  $$("#overlay .flag-shape").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); if (!state.dragMoved) selectFlag(p.dataset.id); }));
+  $$("#overlay .covered-shape.on").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); if (!state.dragMoved) selectCovered(p.dataset.cid, { fromCanvas: true }); }));
   $("#tb-faded").setAttribute("aria-pressed", String(state.faded));
   $("#tb-original").setAttribute("aria-pressed", String(!state.faded));
+  $("#tb-covered").setAttribute("aria-pressed", String(state.showCovered));
 }
 
 function expandPoly(poly, d) {
@@ -588,13 +811,14 @@ function wireViewport() {
   let drag = null;
   vp.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || e.target.closest(".flag-shape, .tag")) return;
-    drag = { x: e.clientX, y: e.clientY, tx: state.view.tx, ty: state.view.ty, moved: false };
+    state.dragMoved = false;
+    drag = { x: e.clientX, y: e.clientY, tx: state.view.tx, ty: state.view.ty };
     vp.classList.add("dragging");
   });
   window.addEventListener("mousemove", (e) => {
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      if (Math.abs(dx) + Math.abs(dy) > 3) state.dragMoved = true;
       state.view.tx = drag.tx + dx;
       state.view.ty = drag.ty + dy;
       applyView(false);
@@ -605,13 +829,13 @@ function wireViewport() {
       const r = vp.getBoundingClientRect();
       tip.textContent = target.dataset.tip;
       tip.hidden = false;
-      tip.style.left = `${Math.min(e.clientX - r.left + 12, r.width - tip.offsetWidth - 8)}px`;
+      tip.style.left = `${Math.max(8, Math.min(e.clientX - r.left + 12, r.width - tip.offsetWidth - 8))}px`;
       tip.style.top = `${e.clientY - r.top + 14}px`;
     } else {
       tip.hidden = true;
     }
   });
-  window.addEventListener("mouseup", () => { drag = null; vp.classList.remove("dragging"); });
+  window.addEventListener("mouseup", () => { drag = null; vp.classList.remove("dragging"); setTimeout(() => (state.dragMoved = false), 0); });
   vp.addEventListener("wheel", (e) => {
     e.preventDefault();
     const r = vp.getBoundingClientRect();
@@ -626,17 +850,52 @@ function wireViewport() {
   window.addEventListener("resize", () => { if (state.screen === "results") fitView(false); });
 }
 
+/* ------------------------------------------------------------------ BoC viewer (boc-view.js) */
+function openBoc(opts = {}) {
+  if (state.screen !== "results" || !window.TallyBocView) return;
+  const f = state.flags.find((x) => x.flag_id === state.selected);
+  const cov = state.coveredItems.find((x) => x.id === state.coveredSel);
+  const activeCharNo = f ? (f.char_no || f.nearest_char_no) : cov?.char_nos[0];
+  closeHelpMenu();
+  window.TallyBocView.open({ runId: state.runId, activeCharNo: activeCharNo ?? undefined, onLocate: locateRow, filter: opts.filter });
+}
+
+async function locateRow({ sheet, bbox, char_no }) {
+  const row = state.rows.find((r) => r.char_no === char_no && r.sheet === sheet);
+  state.selected = null;
+  state.coveredSel = null;
+  state.locate = bbox ? { sheet, bbox, kind: "row", label: `CN ${char_no}` } : null;
+  renderDetail();
+  renderList();
+  if (state.panel === "covered") renderCoveredList();
+  await setSheet(sheet, { fit: !bbox });
+  renderOverlay();
+  if (bbox) requestAnimationFrame(() => zoomToBox(bbox));
+  else toast(`CN ${char_no}${row ? "" : " (not on this sheet)"} has no location on sheet ${sheet}; showing the whole sheet.`);
+}
+
 /* ------------------------------------------------------------------ selection + detail */
 async function selectFlag(id, { zoom = true } = {}) {
   const f = state.flags.find((x) => x.flag_id === id);
   if (!f) return;
   state.selected = id;
+  state.coveredSel = null;
+  state.locate = null;
+  if (state.panel !== "flags") setPanel("flags");
   if (f.sheet !== state.sheet) await setSheet(f.sheet);
   renderList();
   renderOverlay();
   renderDetail();
   if (zoom) requestAnimationFrame(() => zoomToFlag(f));
   $(`#flag-list .flag-row[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
+function clearSelection({ refit = true } = {}) {
+  state.selected = null;
+  renderDetail();
+  renderList();
+  renderOverlay();
+  if (refit) fitView();
 }
 
 function renderDetail() {
@@ -646,41 +905,65 @@ function renderDetail() {
   el.hidden = false;
   const isP = f.class === "places";
   const color = flagVar(f);
-  const extracted = isP ? esc(f.extracted) : "No row covers this region";
-  let nearest = "";
-  if (!isP && f.nearest_char_no) {
-    const dist = f.nearest_distance_mm != null ? `, ${f.nearest_distance_mm} mm away` : "";
-    nearest = `<div class="nearest">Nearest row: <span class="mono ink">CN ${esc(f.nearest_char_no)}</span> (Sheet ${f.sheet}${dist})<br><span class="mono">${esc(f.nearest_requirement)}</span></div>`;
-  } else if (isP) {
-    nearest = `<div class="nearest">The callout on the drawing asks for more instances than the row records.</div>`;
-  }
-  const conf = `${f.confidence[0].toUpperCase()}${f.confidence.slice(1)} (${esc(f.confidence_basis)})`;
-  const transcribed = f.transcription || f.drawing_text;
-  const source = f.transcription ? "read by the model from the crop" : "read by OCR";
-  el.innerHTML = `
-    <div class="detail-head"><span class="rail-title">FLAG DETAIL</span>
-      <span class="ids">${f.flag_id} · Sheet ${f.sheet} · Zone ${f.zone} · ${isP ? "Places shortfall" : "Unaccounted requirement"}</span>
-      <button class="btn btn-xs btn-square" id="detail-close" aria-label="Close detail">${icon("x")}</button></div>
-    <div class="detail-grid">
-      <div class="panel"><div class="panel-label">EXTRACTED (BoC)</div><div class="extracted">${extracted}</div>${nearest}</div>
-      <div class="panel white"><div class="panel-label">ON THE DRAWING</div>
-        <div class="crop-box" style="border-color:${color}"><img alt="Crop of the drawing: ${esc(transcribed)}" src="${f.crop_url}"></div>
-        <div class="transcribed">${esc(transcribed)}</div>
-        <div class="crop-cap">crop · 300 DPI · sheet ${f.sheet} zone ${f.zone} · ${source}</div></div>
-      <div><div class="panel-label">SUSPECTED ISSUE</div>
-        <div class="issue-title">${esc(f.title)}</div>
-        <div class="issue-reason">${esc(f.reason)}</div>
-        <div class="issue-conf">Confidence: <span class="ink">${conf}</span> · rules <span class="mono">${esc(f.rule_ids.join(", "))}</span></div>
-        ${f.disposition !== "open" ? `<div class="disp-note" style="color:${DISP_COLOR[f.disposition]}">${DISP_LABEL[f.disposition]}${f.disposition_note ? `: ${esc(f.disposition_note)}` : ""}</div>` : ""}
+  let boc;
+  if (isP) {
+    const row = state.rows.find((r) => r.char_no === f.char_no);
+    boc = `<div class="boc-quote">
+        <div class="bq-head"><span class="cn-chip">CN ${esc(f.char_no)}</span><span class="muted">Sheet ${f.sheet}${row?.zone ? ` · Zone ${esc(row.zone)}` : ""}</span></div>
+        <div class="bq-req">${esc(row?.requirement || f.nearest_requirement || f.extracted)}</div>
+        <div class="bq-places">Places recorded: <b>${esc(row?.places ?? "?")}</b></div>
       </div>
+      <p class="d-note">The callout on the drawing asks for more places than this row records.</p>`;
+  } else {
+    const dist = f.nearest_distance_mm != null ? `${f.nearest_distance_mm} mm away` : "";
+    boc = `<div class="boc-none">${icon("x")}<span>No BoC row covers this text.</span></div>
+      ${f.nearest_char_no ? `<div class="boc-quote near">
+        <div class="bq-head"><span class="d-k">Nearest row</span><span class="cn-chip">CN ${esc(f.nearest_char_no)}</span><span class="muted">${dist}</span></div>
+        <div class="bq-req">${esc(f.nearest_requirement)}</div>
+      </div>` : ""}`;
+  }
+  const conf = f.confidence ? f.confidence[0].toUpperCase() + f.confidence.slice(1) : "";
+  const transcribed = f.transcription || f.drawing_text;
+  const source = f.transcription ? "Read by the model from the crop" : "Read by OCR";
+  el.innerHTML = `
+    <div class="detail-head">
+      <span class="flag-badge ${isP ? "p" : "u"}" aria-hidden="true">${isP ? "P" : "U"}</span>
+      <div class="dh-titles"><div class="dh-title">${f.flag_id} · ${isP ? "Places shortfall" : "Unaccounted requirement"}</div><div class="dh-sub">Sheet ${f.sheet} · Zone ${f.zone}</div></div>
+      ${statusPill(f)}
+      <button class="btn btn-sm btn-quiet btn-square" id="detail-close" aria-label="Close detail (Esc)" title="Close (Esc)">${icon("x")}</button></div>
+    <div class="detail-grid">
+      <section class="dcol">
+        <h3 class="dcol-h">${icon("table")}What the BoC says</h3>
+        ${boc}
+      </section>
+      <section class="dcol">
+        <h3 class="dcol-h">${icon("sheet")}On the drawing</h3>
+        <div class="crop-box" style="--fc:${color}"><img alt="Crop of the drawing around ${esc(f.flag_id)}" src="${f.crop_url}"></div>
+        ${transcribed ? `<div class="ocr-line"><span class="ocr-k">${source}</span><span class="ocr-t">${esc(transcribed)}</span></div>` : ""}
+        <div class="crop-cap">300 DPI crop · Sheet ${f.sheet} · Zone ${f.zone}</div>
+      </section>
+      <section class="dcol">
+        <h3 class="dcol-h">${icon("alert")}Why it's flagged</h3>
+        <div class="issue-title">${esc(f.title)}</div>
+        <p class="issue-reason">${esc(f.reason)}</p>
+        <div class="issue-meta">
+          ${conf ? `<span class="conf-pill conf-${esc(f.confidence)}">${conf} confidence</span>` : ""}
+          <span class="muted">${esc(f.confidence_basis || "")}</span>
+          ${f.rule_ids?.length ? `<span class="rules">Rule ${esc(f.rule_ids.join(", "))}</span>` : ""}
+        </div>
+        ${f.disposition !== "open" ? `<div class="disp-note" style="--dc:${DISP_COLOR[f.disposition]}">${DISP_LABEL[f.disposition]}${f.disposition_note ? `: ${esc(f.disposition_note)}` : ""}</div>` : ""}
+      </section>
     </div>
-    <div class="actions">
-      <button class="btn btn-sm act-confirm ${f.disposition === "confirmed" ? "on" : ""}" id="act-c">${icon("check")}Confirm miss<span class="key">C</span></button>
-      <button class="btn btn-sm act-exclude ${f.disposition === "excluded" ? "on" : ""}" id="act-e">${icon("shield")}Excluded by customer rule<span class="key">E</span></button>
-      <button class="btn btn-sm act-dismiss ${f.disposition === "dismissed" ? "on" : ""}" id="act-d">${icon("slash")}Dismiss<span class="key">D</span></button>
-      <div class="nav"><button class="btn btn-sm" id="act-k">${icon("chev-l")}Prev<span class="key">K</span></button><button class="btn btn-sm" id="act-j">Next<span class="key">J</span>${icon("chev-r")}</button></div>
+    <div class="actions" data-tour="decisions">
+      <span class="actions-label">Your decision</span>
+      <div class="decide" role="group" aria-label="Decision for ${f.flag_id}">
+        <button class="btn btn-sm act-confirm ${f.disposition === "confirmed" ? "on" : ""}" id="act-c" aria-pressed="${f.disposition === "confirmed"}">${icon("check")}<span>Confirm miss</span><kbd>C</kbd></button>
+        <button class="btn btn-sm act-exclude ${f.disposition === "excluded" ? "on" : ""}" id="act-e" aria-pressed="${f.disposition === "excluded"}">${icon("shield")}<span>Excluded by customer rule</span><kbd>E</kbd></button>
+        <button class="btn btn-sm act-dismiss ${f.disposition === "dismissed" ? "on" : ""}" id="act-d" aria-pressed="${f.disposition === "dismissed"}">${icon("slash")}<span>Dismiss</span><kbd>D</kbd></button>
+      </div>
+      <div class="nav" role="group" aria-label="Move between flags"><button class="btn btn-sm" id="act-k" title="Previous flag (K)">${icon("chev-l")}<span>Prev</span><kbd>K</kbd></button><button class="btn btn-sm" id="act-j" title="Next flag (J)"><span>Next</span><kbd>J</kbd>${icon("chev-r")}</button></div>
     </div>`;
-  $("#detail-close").onclick = () => { state.selected = null; renderDetail(); renderList(); renderOverlay(); fitView(); };
+  $("#detail-close").onclick = () => clearSelection();
   $("#act-c").onclick = () => dispose("confirmed");
   $("#act-e").onclick = () => openRulePop();
   $("#act-d").onclick = () => dispose("dismissed");
@@ -748,8 +1031,10 @@ function openRulePop() {
     else { ruleChoice = b.dataset.p; saveRule(); }
   }));
   pop.hidden = false;
-  const r = btn.getBoundingClientRect();
-  pop.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - 332))}px`;
+  // fixed popover: convert the button's zoomed rect and the window size into local CSS px (UI scale)
+  const r = localRect(btn);
+  const vw = window.innerWidth / uiFactor();
+  pop.style.left = `${Math.max(12, Math.min(r.left, vw - pop.offsetWidth - 12))}px`;
   pop.style.top = `${Math.max(12, r.top - pop.offsetHeight - 8)}px`;
   $("#rule-presets button")?.focus();
 }
@@ -861,30 +1146,113 @@ function renderHelp() {
   $("#shortcuts").innerHTML = SHORTCUTS.map(([k, a]) => `<div><span class="k">${k}</span><span class="a">${a}</span></div>`).join("");
 }
 
+function openHelpModal() {
+  closeHelpMenu();
+  $("#help-tour").hidden = state.screen !== "results";
+  $("#help").hidden = false;
+}
+
+// Help menu in the top bar: absolutely positioned under its button, so no rect math (and no UI-scale issue).
+function openHelpMenu() {
+  const onResults = state.screen === "results";
+  const tour = $("#menu-tour");
+  tour.disabled = !onResults;
+  $("#menu-tour-sub").textContent = onResults ? "A short walk through the results" : "Available once a check has run";
+  $("#help-menu").hidden = false;
+  $("#btn-help").setAttribute("aria-expanded", "true");
+  (onResults ? tour : $("#menu-keys")).focus();
+}
+function closeHelpMenu() {
+  const m = $("#help-menu");
+  if (!m || m.hidden) return false;
+  m.hidden = true;
+  $("#btn-help").setAttribute("aria-expanded", "false");
+  return true;
+}
+function wireHelpMenu() {
+  $("#btn-help").onclick = (e) => { e.stopPropagation(); if ($("#help-menu").hidden) openHelpMenu(); else closeHelpMenu(); };
+  $("#menu-tour").onclick = () => { closeHelpMenu(); startTour(); };
+  $("#menu-keys").onclick = () => openHelpModal();
+  $("#help-menu").addEventListener("keydown", (e) => {
+    const items = $$("#help-menu [role=menuitem]:not(:disabled)");
+    const i = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+    else if (e.key === "Tab") closeHelpMenu();
+  });
+  document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".menu-wrap")) closeHelpMenu(); });
+}
+
 function closeOverlays() {
-  let closed = closeInfoPop();
+  let closed = closeInfoPop() || closeHelpMenu();
   for (const id of ["#help", "#export-modal", "#settings", "#rule-pop"]) {
     if (!$(id).hidden) { $(id).hidden = true; closed = true; }
   }
   return closed;
 }
 
+/* ------------------------------------------------------------------ guided tour (tour.js) */
+// The detail and decision steps need an open flag: their before() hook opens the first visible one
+// and the tour's end event closes it again if the tour opened it.
+let tourOpenedFlag = null;
+function prepTourFlag() {
+  if (state.panel !== "flags") setPanel("flags");
+  if (state.selected) return;
+  const first = visibleFlags()[0] || state.flags[0];
+  if (!first) return;
+  tourOpenedFlag = first.flag_id;
+  return selectFlag(first.flag_id).then(() => new Promise((r) => setTimeout(r, 320)));
+}
+function wireTour() {
+  const T = window.TallyTour;
+  if (!T?.setSteps) return;
+  const defaults = T.defaults?.() || [];
+  const flagsText = defaults.find((d) => d.key === "flags")?.text;
+  T.setSteps([
+    "summary",
+    "sheets",
+    "canvas",
+    { key: "flags", before: () => { if (state.panel !== "flags") setPanel("flags"); },
+      text: (flagsText ? `${flagsText} ` : "") + "The <b>Covered</b> tab lists the text a BoC row already covers, read-only." },
+    { key: "detail", before: prepTourFlag },
+    { key: "decisions", before: prepTourFlag },
+    "export",
+  ]);
+  document.addEventListener("tallytour:end", () => {
+    if (tourOpenedFlag && state.selected === tourOpenedFlag && state.screen === "results") clearSelection();
+    tourOpenedFlag = null;
+  });
+}
+function startTour() {
+  if (state.screen !== "results") return;
+  closeOverlays();
+  window.TallyTour?.start?.({ force: true });
+}
+
 /* ------------------------------------------------------------------ keyboard */
 function onKey(e) {
+  if (window.TallyBocView?.isOpen?.() || window.TallyTour?.isOpen?.()) return; // both modules handle their own keys
   const typing = e.target.closest?.("input, textarea, select");
-  if (e.key === "Escape") { if (!closeOverlays() && state.selected && state.screen === "results") { state.selected = null; renderDetail(); renderList(); renderOverlay(); } return; }
+  if (e.key === "Escape") {
+    if (!closeOverlays() && state.screen === "results") {
+      if (state.selected) clearSelection({ refit: false });
+      else if (state.locate) { state.locate = null; state.coveredSel = null; renderOverlay(); if (state.panel === "covered") renderCoveredList(); }
+    }
+    return;
+  }
   if (typing) {
     if (e.key === "Enter" && e.target.id === "rule-note") saveRule();
     return;
   }
-  if (e.key === "?") { e.preventDefault(); $("#help").hidden = !$("#help").hidden; return; }
+  if (e.key === "?") { e.preventDefault(); if ($("#help").hidden) openHelpModal(); else $("#help").hidden = true; return; }
   if (state.screen !== "results") return;
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") { e.preventDefault(); openExport(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undoLast(); return; }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "e") { e.preventDefault(); openExport(); return; }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); undoLast(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (!$("#export-modal").hidden || !$("#settings").hidden || !$("#help").hidden) return;
   const k = e.key.toLowerCase();
   const sheets = state.run.sheets_checked || [1];
+  const filterTo = (f) => { if (state.panel !== "flags") setPanel("flags"); state.filter = f; renderChips(); renderList(); };
   if (k === "j") step(1);
   else if (k === "k") step(-1);
   else if (k === "c" && state.selected) dispose("confirmed");
@@ -894,13 +1262,16 @@ function onKey(e) {
   else if (k === "+" || k === "=") zoomBy(1.25);
   else if (k === "-" || k === "_") zoomBy(0.8);
   else if (k === "o") { state.faded = !state.faded; renderOverlay(); }
+  else if (k === "v") setShowCovered(!state.showCovered);
+  else if (k === "b") { e.preventDefault(); openBoc(); }
   else if (/^[1-9]$/.test(k) && sheets.includes(+k)) setSheet(+k, { fit: true });
-  else if (k === "u") { state.filter = "u"; renderChips(); renderList(); }
-  else if (k === "p") { state.filter = "p"; renderChips(); renderList(); }
-  else if (k === "a") { state.filter = "all"; renderChips(); renderList(); }
+  else if (k === "u") filterTo("u");
+  else if (k === "p") filterTo("p");
+  else if (k === "a") filterTo("all");
 }
 
 /* ------------------------------------------------------------------ theme */
+// Light by default. Dark only when picked with the toggle; the choice is kept in localStorage.
 const THEME_KEY = "tallymark-theme";
 function storedTheme() {
   try { const t = localStorage.getItem(THEME_KEY); return t === "light" || t === "dark" ? t : null; } catch (e) { return null; }
@@ -913,15 +1284,12 @@ function applyTheme(t) {
   b.title = `Switch to ${next} mode`;
 }
 function wireTheme() {
-  const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  applyTheme(storedTheme() || (mq.matches ? "dark" : "light"));
+  applyTheme(storedTheme() || "light");
   $("#btn-theme").onclick = () => {
     const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* private mode: the choice lasts for this page only */ }
     applyTheme(t);
   };
-  // With no stored choice, keep following the system setting live.
-  mq.addEventListener?.("change", (e) => { if (!storedTheme()) applyTheme(e.matches ? "dark" : "light"); });
 }
 
 /* ------------------------------------------------------------------ info popovers (load cards) */
@@ -962,8 +1330,9 @@ function scheduleCloseInfoPop() {
 function positionInfoPop() {
   if (!infoPop.id) return;
   const pop = $(`#${infoPop.id}`);
-  const r = infoBtn(infoPop.id).getBoundingClientRect();
-  const vw = window.innerWidth, vh = window.innerHeight;
+  // fixed popover: the button's rect and the window size are converted to local CSS px (UI scale)
+  const r = localRect(infoBtn(infoPop.id));
+  const vw = window.innerWidth / uiFactor(), vh = window.innerHeight / uiFactor();
   const w = pop.offsetWidth, h = pop.offsetHeight;
   const left = Math.max(16, Math.min(r.left - 28, vw - w - 16));
   let top = r.bottom + 10;
@@ -1060,6 +1429,19 @@ function wirePeek() {
   schedulePeek();
 }
 
+/* ------------------------------------------------------------------ layout tools (layout-tools.js) */
+// Resizable side panes and the interface size control. Without the module the app keeps its fixed layout.
+function wireLayout() {
+  const L = window.TallyLayout;
+  if (!L) return;
+  const refit = () => { if (state.screen === "results" && !state.selected && !state.locate) fitView(false); };
+  const center = $("#canvas-col");
+  L.makeResizable($("#rail"), { side: "left", min: 96, max: 320, defaultWidth: 176, storageKey: "tallymark.pane.rail", onResize: refit, center, label: "Resize the sheets panel" });
+  L.makeResizable($("#flags-col"), { side: "right", min: 240, max: 560, defaultWidth: 340, storageKey: "tallymark.pane.flags", onResize: refit, center, label: "Resize the flags panel" });
+  L.uiScale.mountControl($("#scale-slot-top"));
+  L.uiScale.mountControl($("#scale-slot-drawer"), { shortcuts: false });
+}
+
 /* ------------------------------------------------------------------ boot */
 async function boot() {
   wireDropCard("drawing");
@@ -1075,8 +1457,22 @@ async function boot() {
   $("#mismatch-cancel").onclick = () => ($("#banner-mismatch").hidden = true);
   $("#btn-edit-excl").onclick = openSettings;
   $("#btn-settings").onclick = openSettings;
-  $("#btn-help").onclick = () => ($("#help").hidden = false);
+  wireHelpMenu();
   $("#help").onclick = () => ($("#help").hidden = true);
+  $("#help-tour").onclick = (e) => { e.stopPropagation(); $("#help").hidden = true; startTour(); };
+  $("#btn-boc").onclick = () => openBoc();
+  $("#tb-covered").onclick = () => setShowCovered(!state.showCovered);
+  $("#tab-flags").onclick = () => setPanel("flags");
+  $("#tab-covered").onclick = () => setPanel("covered");
+  $$(".panel-tabs [role=tab]").forEach((t) => t.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const other = t.id === "tab-flags" ? "covered" : "flags";
+    setPanel(other);
+    $(`#tab-${other}`).focus();
+  }));
+  $("#covered-search").oninput = (e) => { state.coveredQuery = e.target.value; renderCoveredList(); };
+  $("#covered-boc").onclick = () => openBoc({ filter: "covered" });
   $("#btn-export").onclick = openExport;
   $("#btn-rerun").onclick = () => { clearTimeout(procTimer); state.skipSheets = []; show("load"); renderLoad(); };
   const cancel = () => { clearTimeout(procTimer); state.runId = null; show("load"); renderLoad(); };
@@ -1115,6 +1511,8 @@ async function boot() {
     renderKeyStatus(r.message, r.ok);
   };
   document.addEventListener("keydown", onKey);
+  wireLayout();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireTour, { once: true }); else wireTour();
   document.addEventListener("mousedown", (e) => { if (!$("#rule-pop").hidden && !e.target.closest("#rule-pop, #act-e")) closeRulePop(); });
   await loadSettings();
   show("load");

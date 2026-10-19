@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layout Tools Harness</title>
+<!-- Interface scale before first paint (the same snippet the app should inline in <head>). -->
+<script>
+  (function () {
+    var s = 100;
+    try { s = parseInt(localStorage.getItem("tallymark.uiScale"), 10) || 100; } catch (e) {}
+    if ([85, 90, 100, 110, 120, 130].indexOf(s) < 0) s = 100;
+    var d = document.documentElement;
+    d.style.setProperty("--tally-ui-zoom", String(s / 100));
+    if (s !== 100) d.style.zoom = String(s / 100);
+    d.setAttribute("data-ui-scale", String(s));
+  })();
+</script>
+<link rel="stylesheet" href="../layout-tools.css?v=dev">
+<style>
+  :root {
+    --bg: #f4f6f9; --panel: #fff; --border: #dde1e7; --ink: #1a1f2b; --ink-2: #5b6675; --muted: #8a94a3;
+    --canvas: #e9ecf0; --accent: #2f5d8a; --red: #c8372d; --ok: #2e7d4f; --amber: #b7791f; --radius: 10px;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161d; --panel: #1b2029; --border: #2f3642; --ink: #e7eaf0; --ink-2: #a3acb9; --muted: #7c8696;
+    --canvas: #0e1117; --accent: #7aa7d6; --red: #ef6a5f; --ok: #5cc28b; color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161d; --panel: #1b2029; --border: #2f3642; --ink: #e7eaf0; --ink-2: #a3acb9; --muted: #7c8696;
+      --canvas: #0e1117; --accent: #7aa7d6; --red: #ef6a5f; --ok: #5cc28b; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); }
+  body { color: var(--ink); font: 13px/1.4 var(--sans); }
+  [hidden] { display: none !important; }
+  #app { height: 100vh; display: flex; flex-direction: column; min-height: 0; }
+  .top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .top h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 600; }
+  .top label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+  .top select, .btn { height: 28px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .spacer { flex: 1; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .workspace { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 116px; flex: 0 0 116px; border-right: 1px solid var(--border); background: var(--panel); padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+  .rail-title { font-size: 10.5px; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .thumb { height: 74px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas); display: flex; align-items: flex-end; padding: 4px 6px; font-size: 11px; color: var(--ink-2); }
+  .canvas-col { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .toolbar .btn { height: 24px; font-size: 11.5px; }
+  .readout { margin-left: auto; font: 11.5px var(--mono); color: var(--ink-2); }
+  .viewport { flex: 1; position: relative; overflow: hidden; min-height: 0; cursor: grab; }
+  .viewport.dragging { cursor: grabbing; }
+  .stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #fff; box-shadow: 0 1px 3px rgba(27,36,48,.14); }
+  .overlay { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .box { fill: #c8372d; fill-opacity: .12; stroke: #c8372d; stroke-width: 2; cursor: pointer; }
+  .box:hover { fill-opacity: .25; }
+  .box.sel { fill: #2f5d8a; stroke: #2f5d8a; fill-opacity: .28; }
+  .callouts { position: absolute; inset: 0; pointer-events: none; }
+  .callout { position: absolute; border: 1.5px dashed #2f5d8a; border-radius: 2px; }
+  .callout b { position: absolute; left: -1px; bottom: calc(100% + 2px); padding: 1px 4px; font: 600 11px/1.1 var(--mono); background: #2f5d8a; color: #fff; pointer-events: auto; cursor: pointer; white-space: nowrap; }
+  .hover-tip { position: absolute; z-index: 5; pointer-events: none; background: #1a1f2b; color: #fff; padding: 4px 7px; border-radius: 4px; font: 11.5px var(--mono); white-space: nowrap; }
+  .flags-col { width: 320px; flex: 0 0 320px; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .flags-head { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .flag-list { overflow: auto; flex: 0 1 auto; max-height: 34%; border-bottom: 1px solid var(--border); }
+  .flag { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+  .flag:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .flag.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .log { flex: 1; overflow: auto; padding: 8px 12px; font: 11.5px/1.5 var(--mono); }
+  .log .ok { color: var(--ok); } .log .bad { color: var(--red); font-weight: 600; }
+  .log h3 { font: 600 10.5px var(--sans); letter-spacing: .08em; color: var(--muted); margin: 10px 0 4px; }
+  table.res { border-collapse: collapse; width: 100%; font: 11px var(--mono); }
+  table.res td, table.res th { border-bottom: 1px solid var(--border); padding: 3px 4px; text-align: left; }
+  @media (max-width: 800px) {
+    .workspace { flex-direction: column; }
+    .rail { display: none; }
+    .canvas-col { min-height: 50vh; }
+    .flags-col { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div id="app" data-ui-scale-fill>
+  <header class="top">
+    <h1>Layout tools harness</h1>
+    <span id="scale-mount"></span>
+    <label>Theme
+      <select id="theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+    </label>
+    <label title="Puts data-ui-scale-exempt on the drawing viewport so its effective zoom stays 1">
+      <input type="checkbox" id="exempt" checked> Exempt canvas from UI scale
+    </label>
+    <span class="spacer"></span>
+    <span class="muted mono" id="widths"></span>
+    <button class="btn btn-primary" id="run">Run hit-test at every scale</button>
+  </header>
+  <div class="workspace">
+    <aside class="rail" id="rail">
+      <div class="rail-title">SHEETS</div>
+      <div class="thumb">Sheet 1</div><div class="thumb">Sheet 2</div><div class="thumb">Sheet 3</div><div class="thumb">Sheet 4</div>
+    </aside>
+    <section class="canvas-col" id="center">
+      <div class="toolbar">
+        <button class="btn" id="fit">Fit</button>
+        <button class="btn" id="zin">+</button>
+        <button class="btn" id="zout">-</button>
+        <span class="readout" id="readout"></span>
+      </div>
+      <div class="viewport" id="viewport" data-ui-scale-exempt>
+        <div class="stage" id="stage"><svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
+        <div class="callouts" id="callouts"></div>
+        <div class="hover-tip" id="tip" hidden></div>
+      </div>
+    </section>
+    <aside class="flags-col" id="flags">
+      <div class="flags-head"><span class="rail-title">BOXES</span> <span class="muted">click a row to zoom to it</span></div>
+      <div class="flag-list" id="list"></div>
+      <div class="log" id="log"><h3>CLICK LOG (native target vs coordinate math)</h3></div>
+    </aside>
+  </div>
+</div>
+
+<script src="../layout-tools.js?v=dev"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var UI = TallyLayout.uiScale;
+  var vp = $("#viewport"), stage = $("#stage"), svg = $("#overlay"), callouts = $("#callouts"), tip = $("#tip");
+
+  /* Known boxes in normalized sheet coordinates (0..1), like the app's flag bboxes. */
+  var BOXES = [
+    { id: "B1", x: 0.06, y: 0.10, w: 0.10, h: 0.08 }, { id: "B2", x: 0.30, y: 0.12, w: 0.06, h: 0.05 },
+    { id: "B3", x: 0.55, y: 0.09, w: 0.14, h: 0.09 }, { id: "B4", x: 0.82, y: 0.14, w: 0.08, h: 0.12 },
+    { id: "B5", x: 0.10, y: 0.42, w: 0.05, h: 0.04 }, { id: "B6", x: 0.36, y: 0.40, w: 0.12, h: 0.10 },
+    { id: "B7", x: 0.62, y: 0.44, w: 0.03, h: 0.03 }, { id: "B8", x: 0.80, y: 0.45, w: 0.12, h: 0.06 },
+    { id: "B9", x: 0.07, y: 0.74, w: 0.16, h: 0.10 }, { id: "B10", x: 0.40, y: 0.76, w: 0.05, h: 0.08 },
+    { id: "B11", x: 0.60, y: 0.73, w: 0.09, h: 0.05 }, { id: "B12", x: 0.85, y: 0.80, w: 0.06, h: 0.06 },
+  ];
+  var view = { s: 1, tx: 0, ty: 0, W: 0, H: 0, aspect: 8.5 / 11 };
+  var selected = null;
+
+  /* ---------------- canvas: the same coordinate pattern as app.js (layoutBase / applyView / wheel / drag) */
+  function layoutBase() {
+    var r = vp.getBoundingClientRect();
+    var pad = 18, W = r.width - pad * 2, H = W * view.aspect;
+    if (H > r.height - pad * 2) { H = r.height - pad * 2; W = H / view.aspect; }
+    W = Math.max(W, 100); H = Math.max(H, 100);
+    stage.style.width = W + "px"; stage.style.height = H + "px";
+    view.W = W; view.H = H;
+    return { vw: r.width, vh: r.height, W: W, H: H };
+  }
+  function applyView() {
+    stage.style.transform = "translate(" + view.tx + "px, " + view.ty + "px) scale(" + view.s + ")";
+    renderCallouts();
+    $("#readout").textContent = "canvas " + Math.round(view.s * 100) + "% · UI " + UI.get() + "% · viewport zoom " + TallyLayout.uiScale.zoomOf(vp).toFixed(3);
+  }
+  function fitView() {
+    var b = layoutBase();
+    view.s = 1; view.tx = (b.vw - b.W) / 2; view.ty = (b.vh - b.H) / 2;
+    applyView();
+  }
+  function zoomBy(f) {
+    var r = vp.getBoundingClientRect(), s = view.s, ns = Math.min(8, Math.max(0.5, s * f));
+    var cx = r.width / 2, cy = r.height / 2;
+    view.tx = cx - ((cx - view.tx) / s) * ns; view.ty = cy - ((cy - view.ty) / s) * ns; view.s = ns;
+    applyView();
+  }
+  function zoomToBox(b) {
+    var base = layoutBase();
+    var s = Math.min(4, Math.max(1, Math.min(base.vw / (b.w * base.W * 1.6 + 40), base.vh / (b.h * base.H * 1.6 + 40))));
+    view.s = s; view.tx = base.vw / 2 - s * (b.x + b.w / 2) * base.W; view.ty = base.vh / 2 - s * (b.y + b.h / 2) * base.H;
+    applyView();
+  }
+
+  function renderOverlay() {
+    var W = 1000, H = 1000 * view.aspect, parts = [];
+    parts.push('<rect x="8" y="8" width="' + (W - 16) + '" height="' + (H - 16) + '" fill="none" stroke="#9aa3ae" stroke-width="1.5"/>');
+    for (var i = 1; i < 8; i++) parts.push('<line x1="' + (i * W / 8) + '" y1="8" x2="' + (i * W / 8) + '" y2="20" stroke="#9aa3ae"/>');
+    parts.push('<rect x="' + (W - 260) + '" y="' + (H - 90) + '" width="252" height="82" fill="none" stroke="#9aa3ae"/>');
+    parts.push('<text x="' + (W - 248) + '" y="' + (H - 55) + '" font-size="20" fill="#5b6675" font-family="monospace">HARNESS-001 REV A</text>');
+    BOXES.forEach(function (b) {
+      parts.push('<rect class="box' + (selected === b.id ? " sel" : "") + '" data-id="' + b.id + '" data-tip="' + b.id + ' (click to test)" x="' + b.x * W + '" y="' + b.y * H +
+        '" width="' + b.w * W + '" height="' + b.h * H + '" vector-effect="non-scaling-stroke"/>');
+    });
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.innerHTML = parts.join("");
+  }
+
+  /* Overlay boxes positioned from getBoundingClientRect(), the pattern that breaks under zoom
+   * if visual px (rects) are written into local px (style). */
+  function renderCallouts() {
+    var vr = vp.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    callouts.innerHTML = BOXES.map(function (b) {
+      var l = sr.left - vr.left + b.x * sr.width, t = sr.top - vr.top + b.y * sr.height;
+      return '<div class="callout" data-for="' + b.id + '" style="left:' + l + 'px;top:' + t + 'px;width:' + b.w * sr.width + 'px;height:' + b.h * sr.height + 'px"><b data-id="' + b.id + '">' + b.id + "</b></div>";
+    }).join("");
+  }
+
+  /* Coordinate-math hit test: client point -> viewport px -> sheet coords -> which box. */
+  function mathHit(clientX, clientY) {
+    var r = vp.getBoundingClientRect();
+    var px = (clientX - r.left - view.tx) / view.s / view.W, py = (clientY - r.top - view.ty) / view.s / view.H;
+    for (var i = 0; i < BOXES.length; i++) {
+      var b = BOXES[i];
+      if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+
+  var lastClick = null;
+  function log(html) { var d = document.createElement("div"); d.innerHTML = html; $("#log").appendChild(d); $("#log").scrollTop = 1e9; }
+
+  var drag = null;
+  vp.addEventListener("mousedown", function (e) {
+    if (e.button !== 0 || e.target.closest("[data-id]")) return;
+    drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false };
+    vp.classList.add("dragging");
+  });
+  window.addEventListener("mousemove", function (e) {
+    if (drag) {
+      var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      view.tx = drag.tx + dx; view.ty = drag.ty + dy;
+      applyView();
+      return;
+    }
+    var t = e.target.closest && e.target.closest("[data-tip]");
+    if (t && vp.contains(t)) {
+      var r = vp.getBoundingClientRect();
+      tip.textContent = t.getAttribute("data-tip"); tip.hidden = false;
+      tip.style.left = Math.min(e.clientX - r.left + 12, r.width - tip.offsetWidth - 8) + "px";
+      tip.style.top = (e.clientY - r.top + 14) + "px";
+    } else tip.hidden = true;
+  });
+  window.addEventListener("mouseup", function () { if (drag) { var m = drag.moved; drag = null; vp.classList.remove("dragging"); vp._justDragged = m; } });
+  vp.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var r = vp.getBoundingClientRect(), s = view.s, ns = Math.min(8, Math.max(0.5, s * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    var px = e.clientX - r.left, py = e.clientY - r.top;
+    view.tx = px - ((px - view.tx) / s) * ns; view.ty = py - ((py - view.ty) / s) * ns; view.s = ns;
+    applyView();
+  }, { passive: false });
+  vp.addEventListener("click", function (e) {
+    if (vp._justDragged) { vp._justDragged = false; return; }
+    var t = e.target.closest("[data-id]");
+    var nativeId = t ? t.getAttribute("data-id") : null;
+    var mathId = mathHit(e.clientX, e.clientY);
+    lastClick = { nativeId: nativeId, mathId: mathId };
+    if (!e.isTrusted) return; // the automated test reads lastClick; only real clicks get logged
+    if (t && t.tagName === "B") { log('<span class="ok">OK </span>UI ' + UI.get() + "% · tag " + nativeId + " (label above the box, no math check)"); select(nativeId, false); return; }
+    var ok = nativeId === mathId;
+    log('<span class="' + (ok ? "ok" : "bad") + '">' + (ok ? "OK " : "MISMATCH ") + "</span>UI " + UI.get() + "% · native " + (nativeId || "-") + " · math " + (mathId || "-"));
+    if (nativeId) select(nativeId, false);
+  });
+  window.addEventListener("resize", fitView); // same as app.js: refit on resize (uiScale.set dispatches one)
+
+  /* ---------------- side list */
+  function renderList() {
+    $("#list").innerHTML = BOXES.map(function (b) {
+      return '<div class="flag' + (selected === b.id ? " sel" : "") + '" data-box="' + b.id + '"><b class="mono">' + b.id + '</b><span class="muted mono">x ' + b.x.toFixed(2) + " y " + b.y.toFixed(2) + "</span></div>";
+    }).join("");
+  }
+  $("#list").addEventListener("click", function (e) {
+    var row = e.target.closest("[data-box]"); if (row) select(row.getAttribute("data-box"), true);
+  });
+  function select(id, zoom) {
+    selected = id; renderOverlay(); renderList();
+    if (zoom) zoomToBox(BOXES.filter(function (b) { return b.id === id; })[0]);
+  }
+
+  /* ---------------- panes + scale control */
+  function showWidths() { $("#widths").textContent = "rail " + rail.getWidth() + "px · flags " + flags.getWidth() + "px"; }
+  var rail = TallyLayout.makeResizable($("#rail"), { side: "left", min: 96, max: 320, defaultWidth: 116, storageKey: "tallymark.demo.railWidth", label: "Resize sheets panel", onResize: function () { fitView(); showWidths(); } });
+  var flags = TallyLayout.makeResizable($("#flags"), { side: "right", min: 240, max: 560, defaultWidth: 320, storageKey: "tallymark.demo.flagsWidth", label: "Resize flags panel", onResize: function () { fitView(); showWidths(); } });
+  UI.mountControl($("#scale-mount"));
+  UI.onChange(function () { showWidths(); });
+
+  $("#theme").addEventListener("change", function (e) {
+    if (e.target.value) document.documentElement.setAttribute("data-theme", e.target.value);
+    else document.documentElement.removeAttribute("data-theme");
+  });
+  $("#exempt").addEventListener("change", function (e) { vp.toggleAttribute("data-ui-scale-exempt", e.target.checked); fitView(); });
+  $("#fit").onclick = fitView; $("#zin").onclick = function () { zoomBy(1.25); }; $("#zout").onclick = function () { zoomBy(0.8); };
+
+  /* ---------------- automated hit-test */
+  function frames(n) { return new Promise(function (res) { (function f(k) { if (k <= 0) res(); else requestAnimationFrame(function () { f(k - 1); }); })(n); }); }
+  function rectOf(id) { return svg.querySelector('rect[data-id="' + id + '"]').getBoundingClientRect(); }
+  function near(a, b, tol) { return Math.abs(a - b) <= (tol || 1.5); }
+
+  async function checkState(label, out) {
+    var vr = vp.getBoundingClientRect();
+    BOXES.forEach(function (b) {
+      var r = rectOf(b.id), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      // skip points off-screen at this zoom, or within 8px of the edge (the pane resize handles overlap it by 4px)
+      if (cx < vr.left + 8 || cx > vr.right - 8 || cy < vr.top + 8 || cy > vr.bottom - 8) return;
+      var hitEl = document.elementFromPoint(cx, cy);
+      var nativeId = hitEl && hitEl.closest("[data-id]") ? hitEl.closest("[data-id]").getAttribute("data-id") : null;
+      lastClick = null;
+      (hitEl || vp).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: cx, clientY: cy, view: window }));
+      var mathId = lastClick && lastClick.mathId;
+      var c = callouts.querySelector('[data-for="' + b.id + '"]').getBoundingClientRect();
+      var aligned = near(c.left, r.left) && near(c.top, r.top) && near(c.width, r.width) && near(c.height, r.height);
+      out.checks++;
+      if (nativeId !== b.id) out.fail.push(label + " " + b.id + ": native hit " + nativeId);
+      if (mathId !== b.id) out.fail.push(label + " " + b.id + ": math hit " + mathId);
+      if (!aligned) out.fail.push(label + " " + b.id + ": callout off by " + (c.left - r.left).toFixed(1) + "," + (c.top - r.top).toFixed(1) + " px");
+    });
+  }
+
+  async function runOne(pct, out) {
+    UI.set(pct); await frames(2); fitView(); await frames(1);
+    var vr = vp.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    out.checks++;
+    if (sr.left < vr.left - 1 || sr.right > vr.right + 1 || sr.top < vr.top - 1 || sr.bottom > vr.bottom + 1 || sr.width < vr.width * 0.5)
+      out.fail.push("fit: sheet " + sr.width.toFixed(0) + "x" + sr.height.toFixed(0) + " vs viewport " + vr.width.toFixed(0) + "x" + vr.height.toFixed(0));
+    await checkState("fit", out);
+    // wheel zoom must keep the point under the cursor fixed
+    var r0 = rectOf("B6"), cx = r0.left + r0.width / 2, cy = r0.top + r0.height / 2;
+    vp.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: cx, clientY: cy, deltaY: -100 }));
+    vp.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: cx, clientY: cy, deltaY: -100 }));
+    var r1 = rectOf("B6"); out.checks++;
+    if (!near(r1.left + r1.width / 2, cx) || !near(r1.top + r1.height / 2, cy)) out.fail.push("wheel anchor drifted " + (r1.left + r1.width / 2 - cx).toFixed(1) + "," + (r1.top + r1.height / 2 - cy).toFixed(1) + " px");
+    await checkState("wheel", out);
+    // pan: a 40,25 px drag must move the sheet 40,25 px on screen
+    var a = rectOf("B1"), sx = vr.left + 6, sy = vr.top + 6;
+    vp.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: sx, clientY: sy }));
+    window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: sx + 40, clientY: sy + 25 }));
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: sx + 40, clientY: sy + 25 }));
+    vp._justDragged = false;
+    var b2 = rectOf("B1"); out.checks++;
+    if (!near(b2.left - a.left, 40) || !near(b2.top - a.top, 25)) out.fail.push("pan moved " + (b2.left - a.left).toFixed(1) + "," + (b2.top - a.top).toFixed(1) + " px for a 40,25 drag");
+    await checkState("pan", out);
+    zoomToBox(BOXES[6]); await frames(1);
+    await checkState("zoomTo B7", out);
+  }
+
+  async function runHitTest(opts) {
+    opts = opts || {};
+    var exempt = opts.exempt !== undefined ? !!opts.exempt : $("#exempt").checked;
+    var before = UI.get(), prevExempt = vp.hasAttribute("data-ui-scale-exempt");
+    vp.toggleAttribute("data-ui-scale-exempt", exempt);
+    var rows = [];
+    for (var i = 0; i < UI.steps.length; i++) {
+      var out = { checks: 0, fail: [] };
+      await runOne(UI.steps[i], out);
+      rows.push({ scale: UI.steps[i], vpZoom: +TallyLayout.uiScale.zoomOf(vp).toFixed(4), checks: out.checks, failures: out.fail.length, sample: out.fail.slice(0, 3) });
+    }
+    vp.toggleAttribute("data-ui-scale-exempt", prevExempt);
+    UI.set(before); await frames(2); fitView();
+    var html = '<h3>HIT-TEST · canvas ' + (exempt ? "EXEMPT" : "NOT exempt") + '</h3><table class="res"><tr><th>UI</th><th>vp zoom</th><th>checks</th><th>result</th></tr>' +
+      rows.map(function (r) { return "<tr><td>" + r.scale + "%</td><td>" + r.vpZoom + "</td><td>" + r.checks + '</td><td class="' + (r.failures ? "bad" : "ok") + '">' + (r.failures ? r.failures + " fail · " + r.sample[0] : "pass") + "</td></tr>"; }).join("") + "</table>";
+    log(html);
+    return rows;
+  }
+  $("#run").onclick = function () { runHitTest(); };
+  window.__harness = { runHitTest: runHitTest, view: view, mathHit: mathHit, rail: rail, flags: flags, fitView: fitView, select: select };
+
+  renderOverlay(); renderList(); fitView(); showWidths();
+})();
+</script>
+</body>
+</html>

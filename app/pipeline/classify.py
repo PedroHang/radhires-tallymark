@@ -2,7 +2,7 @@
 
 Deterministic rules decide everything they can. Only genuinely ambiguous
 leftovers (a bare number with no tolerance and no frame) go to the vision model.
-Rule IDs follow BRD section 7.3.
+Rule IDs (R1-R11) are listed in the README under How it works.
 """
 from __future__ import annotations
 

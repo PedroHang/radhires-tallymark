@@ -1,4 +1,4 @@
-"""Evaluation harness (BRD 7.9). All numbers it prints are measured, on seeded data only.
+"""Evaluation harness. All numbers it prints are measured, on seeded data only.
 
 Two tiers, reported separately because they measure different things:
 
@@ -262,7 +262,7 @@ def main() -> None:
     lines = ["# Tallymark: evaluation report", "",
              "Measured by `python -m tools.eval` on public NIST MBE PMI drawings with seeded changes. "
              "Model check off (rules only), so these numbers do not depend on an API key.", "",
-             "| Metric | BRD target | Tier A: FTC-06, hand-verified GT | Tier B: unseen NIST drawings, reader-proposed GT |",
+             "| Metric | Target | Tier A: FTC-06, hand-verified GT | Tier B: unseen NIST drawings, reader-proposed GT |",
              "| --- | --- | --- | --- |"]
     sa, sb = report["tier_a_hand_verified"]["summary"], report["tier_b_reader_proposed"]["summary"]
     rows_def = [

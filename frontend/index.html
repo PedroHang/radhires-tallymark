@@ -5,16 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tallymark</title>
 <script>
-  /* Theme before first paint: a stored choice wins, otherwise follow the system. */
+  /* Theme before first paint: light unless the user picked dark with the toggle (kept in localStorage). */
   (function () {
     var t = null;
     try { t = localStorage.getItem("tallymark-theme"); } catch (e) {}
-    if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", t);
+    document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
   })();
 </script>
-<link rel="stylesheet" href="app.css?v=5">
-<link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=5">
+<script>(function(){var s=100;try{s=parseInt(localStorage.getItem("tallymark.uiScale"),10)||100}catch(e){}if([85,90,100,110,120,130].indexOf(s)<0)s=100;var d=document.documentElement;d.style.setProperty("--tally-ui-zoom",String(s/100));if(s!==100)d.style.zoom=String(s/100);d.setAttribute("data-ui-scale",String(s));})();</script>
+<link rel="stylesheet" href="app.css?v=6">
+<link rel="stylesheet" href="layout-tools.css?v=6">
+<link rel="stylesheet" href="boc-view.css?v=6">
+<link rel="stylesheet" href="tour.css?v=6">
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=6">
 </head>
 <body>
 <!-- Icon sprite: 24px grid, stroked with currentColor so every icon follows the theme. -->
@@ -45,10 +48,17 @@
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.8v12.4a.6.6 0 0 0 .9.5l9.8-6.2a.6.6 0 0 0 0-1L8.9 5.3a.6.6 0 0 0-.9.5z"/></symbol>
     <symbol id="i-csv" viewBox="0 0 24 24"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19M8.5 13h7M8.5 16.5h7"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="i-fade" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M12 4.5v15M14.5 8h3.5M14.5 12h3.5M14.5 16h3.5"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8.2 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.8"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14.2h8"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.9 3.1 17.6A2 2 0 0 0 4.8 20.5h14.4a2 2 0 0 0 1.7-2.9L13.7 4.9a2 2 0 0 0-3.4 0z"/><path d="M12 9.8v4M12 17v.1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4.5M5.5 4.5h11.5l-2.4 4 2.4 4H5.5"/></symbol>
   </defs>
 </svg>
 
-<div id="app">
+<div id="app" data-ui-scale-fill>
   <header class="topbar">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8.5" class="bm-bg"/><path d="M9.5 9v14M14 9v14M18.5 9v14M23 9v14" class="bm-strokes"/><path d="M6.8 20.6 25.2 11.4" class="bm-slash"/></svg>
@@ -57,13 +67,24 @@
     </div>
     <div class="crumb" id="crumb" hidden><span>/</span><span id="crumb-file"></span></div>
     <div class="topbar-actions">
-      <span class="pill-sim" id="pill-sim" hidden><span class="dot"></span>Simulated export</span>
-      <button class="btn btn-primary btn-sm" id="btn-export" hidden title="Export exceptions (Ctrl+E)"><svg class="i"><use href="#i-download"/></svg><span>Export exceptions</span></button>
-      <button class="btn btn-sm" id="btn-rerun" hidden><svg class="i"><use href="#i-refresh"/></svg><span>Rerun</span></button>
+      <span class="pill-sim" id="pill-sim" hidden title="This BoC was prepared for the demo, not exported by an extraction tool"><span class="dot"></span><span class="hide-md">Simulated export</span><span class="show-md">Simulated</span></span>
+      <div class="tb-group" id="tb-run-actions" hidden>
+        <button class="btn btn-sm" id="btn-boc" title="View the Bill of Characteristics (B)"><svg class="i"><use href="#i-table"/></svg><span class="hide-md">View BoC</span></button>
+        <button class="btn btn-sm" id="btn-rerun" title="Start a new check"><svg class="i"><use href="#i-refresh"/></svg><span class="hide-md">Rerun</span></button>
+      </div>
       <button class="btn btn-sm btn-quiet" id="btn-cancel" hidden><svg class="i"><use href="#i-x"/></svg><span>Cancel</span></button>
-      <button class="btn btn-sm btn-quiet" id="btn-settings"><svg class="i"><use href="#i-gear"/></svg><span class="hide-sm">Settings</span></button>
+      <span class="tb-divider" aria-hidden="true"></span>
+      <div class="scale-slot" id="scale-slot-top"></div>
+      <button class="btn btn-sm btn-quiet" id="btn-settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg><span class="hide-lg">Settings</span></button>
       <button class="btn btn-sm btn-quiet btn-square" id="btn-theme" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="i only-light"><use href="#i-moon"/></svg><svg class="i only-dark"><use href="#i-sun"/></svg></button>
-      <button class="btn btn-sm btn-quiet btn-square" id="btn-help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts"><svg class="i"><use href="#i-help"/></svg></button>
+      <div class="menu-wrap">
+        <button class="btn btn-sm btn-quiet btn-square" id="btn-help" aria-label="Help" title="Help" aria-haspopup="menu" aria-expanded="false" aria-controls="help-menu"><svg class="i"><use href="#i-help"/></svg></button>
+        <div class="menu" id="help-menu" role="menu" aria-label="Help" hidden>
+          <button type="button" role="menuitem" id="menu-tour"><svg class="i"><use href="#i-route"/></svg><span class="mi-t">Take the tour<small id="menu-tour-sub">A short walk through the results</small></span></button>
+          <button type="button" role="menuitem" id="menu-keys"><svg class="i"><use href="#i-keyboard"/></svg><span class="mi-t">Keyboard shortcuts</span><kbd>?</kbd></button>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" id="btn-export" hidden data-tour="export" title="Export exceptions (Ctrl+E)"><svg class="i"><use href="#i-download"/></svg><span class="hide-sm">Export exceptions</span></button>
     </div>
   </header>
 
@@ -150,7 +171,7 @@
             <div class="pk-work">
               <div class="pk-canvas">
                 <div class="pk-stage">
-                  <img src="assets/peek-sheet1.webp?v=5" alt="" width="1100" height="850" draggable="false">
+                  <img src="assets/peek-sheet1.webp?v=6" alt="" width="1100" height="850" draggable="false">
                   <svg class="pk-over" viewBox="0 0 1000 773" preserveAspectRatio="none">
                     <defs>
                       <mask id="pk-veil-mask"><rect width="1000" height="773" fill="white"/><rect x="64" y="301" width="203" height="43" rx="4" fill="black"/><rect x="474" y="578" width="97" height="71" rx="4" fill="black"/></mask>
@@ -233,7 +254,7 @@
 
   <!-- Screen 2: Processing -->
   <main class="screen screen-processing" id="screen-processing" hidden>
-    <aside class="rail" id="proc-rail"><div class="rail-title">SHEETS</div><div id="proc-thumbs"></div></aside>
+    <aside class="rail" id="proc-rail"><div class="rail-head"><span class="col-title">Sheets</span></div><div class="thumbs" id="proc-thumbs"></div></aside>
     <div class="proc-center">
       <div class="proc-grid">
         <div class="proc-sheet">
@@ -241,14 +262,15 @@
           <div class="scanline"></div>
         </div>
         <div class="proc-side">
+          <div class="eyebrow">Running the check</div>
           <div class="proc-title" id="proc-title">Checking the drawing</div>
           <ol class="stages" id="stages"></ol>
-          <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
-          <div class="progress-foot"><span id="progress-pct">0%</span><button class="link-btn" id="proc-cancel">Cancel</button></div>
+          <div class="progress" role="progressbar" aria-label="Check progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress"><div class="progress-bar" id="progress-bar"></div></div>
+          <div class="progress-foot"><span id="progress-pct">0%</span><button class="btn btn-sm btn-quiet" id="proc-cancel"><svg class="i"><use href="#i-x"/></svg><span>Cancel</span></button></div>
           <div class="banner banner-red" id="proc-error" hidden>
             <span id="proc-error-text"></span>
             <span class="banner-actions">
-              <button class="btn btn-sm" id="err-retry">Retry</button>
+              <button class="btn btn-sm" id="err-retry"><svg class="i"><use href="#i-refresh"/></svg><span>Retry</span></button>
               <button class="btn btn-sm" id="err-skip" hidden></button>
               <button class="btn btn-sm btn-quiet" id="err-back">Back</button>
             </span>
@@ -260,29 +282,35 @@
 
   <!-- Screen 3: Results -->
   <main class="screen screen-results" id="screen-results" hidden>
-    <div class="summary" id="summary"></div>
+    <div class="summary" id="summary" data-tour="summary"></div>
     <div id="result-banners"></div>
-    <div class="workspace">
-      <aside class="rail" id="rail"><div class="rail-title">SHEETS</div><div id="thumbs"></div></aside>
-      <section class="canvas-col">
+    <div class="workspace" id="workspace">
+      <aside class="rail" id="rail" data-tour="sheets" aria-label="Sheets">
+        <div class="rail-head"><span class="col-title">Sheets</span><span class="rail-count" id="rail-count"></span></div>
+        <div class="thumbs" id="thumbs"></div>
+      </aside>
+      <section class="canvas-col" id="canvas-col" data-tour="canvas" aria-label="Drawing">
         <div class="toolbar">
-          <select class="sheet-select" id="sheet-select" aria-label="Sheet"></select>
-          <button class="btn btn-xs" id="tb-fit" title="Fit sheet (F)"><svg class="i"><use href="#i-fit"/></svg><span>Fit</span></button>
-          <button class="btn btn-xs btn-square" id="tb-in" title="Zoom in (+)" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
-          <button class="btn btn-xs btn-square" id="tb-out" title="Zoom out (-)" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
-          <span class="tb-sep"></span>
-          <div class="seg" role="group" aria-label="View">
-            <button id="tb-faded" aria-pressed="true" title="Toggle Faded / Original (O)">Faded</button>
-            <button id="tb-original" aria-pressed="false" title="Toggle Faded / Original (O)">Original</button>
+          <select class="sheet-select" id="sheet-select" aria-label="Sheet" data-tour="sheets"></select>
+          <div class="seg seg-view" role="group" aria-label="Drawing view">
+            <button id="tb-faded" aria-pressed="true" title="Faded: covered text greyed out, flags lit (O)"><svg class="i"><use href="#i-fade"/></svg><span>Faded</span></button>
+            <button id="tb-original" aria-pressed="false" title="Original: the untouched drawing sheet (O)"><svg class="i"><use href="#i-eye"/></svg><span>Original</span></button>
           </div>
-          <div class="legend">
-            <span><i class="lg lg-u"></i>U unaccounted</span>
-            <span><i class="lg lg-p"></i>P places</span>
-            <span><i class="lg lg-c"></i>covered</span>
-            <span class="tb-page" id="tb-page"></span>
+          <button class="toggle-btn" id="tb-covered" aria-pressed="false" title="Outline every text region a BoC row covers (V)"><i class="sw-cov" aria-hidden="true"></i><span>Show covered</span></button>
+          <div class="zoom-group" role="group" aria-label="Zoom">
+            <button class="zg-btn" id="tb-out" title="Zoom out (-)" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+            <span class="zg-pct" id="tb-zoom" aria-live="polite">100%</span>
+            <button class="zg-btn" id="tb-in" title="Zoom in (+)" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
           </div>
+          <button class="btn btn-sm" id="tb-fit" title="Fit sheet (F)"><svg class="i"><use href="#i-fit"/></svg><span>Fit</span></button>
+          <div class="legend" aria-label="Legend">
+            <span class="lg-chip"><b class="mini-u">U</b>No BoC row</span>
+            <span class="lg-chip"><b class="mini-p">P</b>Places short</span>
+            <span class="lg-chip lg-covered" title="Faded view: grey boxes are text a BoC row covers"><i class="lg lg-c"></i>Covered (grey)</span>
+          </div>
+          <span class="tb-page" id="tb-page"></span>
         </div>
-        <div class="viewport" id="viewport">
+        <div class="viewport" id="viewport" data-ui-scale-exempt>
           <div class="stage" id="stage">
             <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
             <div class="tags" id="tags"></div>
@@ -290,15 +318,26 @@
           <div class="hover-tip" id="hover-tip" hidden></div>
         </div>
       </section>
-      <aside class="flags-col">
+      <aside class="flags-col" id="flags-col" data-tour="flags" aria-label="Flags">
         <div class="flags-head">
-          <div class="flags-title-row"><span class="rail-title">FLAGS</span><span class="muted mono small">sorted by sheet, zone</span></div>
-          <div class="chips" id="chips"></div>
+          <div class="panel-tabs" role="tablist" aria-label="Right panel">
+            <button role="tab" id="tab-flags" aria-selected="true" aria-controls="flag-list"><svg class="i"><use href="#i-flag"/></svg><span>Flags</span><span class="n" id="tab-flags-n"></span></button>
+            <button role="tab" id="tab-covered" aria-selected="false" aria-controls="covered-list" tabindex="-1" title="Text regions a BoC row already covers (read-only)"><svg class="i"><use href="#i-check"/></svg><span>Covered</span><span class="n" id="tab-covered-n"></span></button>
+          </div>
+          <div id="flags-tools">
+            <div class="chips" id="chips" role="group" aria-label="Filter flags"></div>
+            <div class="sort-note">Sorted by sheet, then zone</div>
+          </div>
+          <div id="covered-tools" hidden>
+            <label class="search"><svg class="i"><use href="#i-search"/></svg><input type="search" id="covered-search" placeholder="Search CN, requirement or text" aria-label="Search covered regions" autocomplete="off" spellcheck="false"></label>
+            <div class="covered-note">Read-only. Click one to see it on the drawing. <button class="link-btn" id="covered-boc">Open in BoC table</button></div>
+          </div>
         </div>
         <div class="flag-list" id="flag-list" role="listbox" aria-label="Flags"></div>
+        <div class="covered-list" id="covered-list" aria-label="Covered text regions" hidden></div>
       </aside>
     </div>
-    <section class="detail" id="detail" hidden></section>
+    <section class="detail" id="detail" data-tour="detail" aria-label="Flag detail" hidden></section>
   </main>
 </div>
 
@@ -311,7 +350,7 @@
   <p>The engineering drawing of the part, every sheet. It is the file the inspector measures against, at the same revision the BoC was built from.</p>
   <figure class="ip-fig ip-draw">
     <div class="ipd-frame">
-      <img src="assets/drawing-crop.webp?v=5" alt="Corner of an engineering drawing with dimension and tolerance callouts" width="640" height="619">
+      <img src="assets/drawing-crop.webp?v=6" alt="Corner of an engineering drawing with dimension and tolerance callouts" width="640" height="619">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <g class="ipd-b" style="--i:0"><circle cx="17.6" cy="11.6" r="3.4"/><text x="17.6" y="12.9">1</text></g>
         <g class="ipd-b" style="--i:1"><circle cx="22" cy="16" r="3.4"/><text x="22" y="17.3">2</text></g>
@@ -364,7 +403,7 @@
 
 <div class="modal-back" id="export-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <div class="modal-head"><div id="export-title">Export exceptions</div><button class="btn btn-xs btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div id="export-title">Export exceptions</div><button class="btn btn-sm btn-quiet btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="modal-body">
       <div class="export-opts">
         <label><input type="checkbox" id="export-dismissed"> Include dismissed flags</label>
@@ -379,8 +418,11 @@
 
 <div class="drawer-back" id="settings" hidden>
   <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <div class="modal-head"><div id="settings-title">Exclusions</div><button class="btn btn-xs btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div id="settings-title">Settings</div><button class="btn btn-sm btn-quiet btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="drawer-body">
+      <div class="drawer-section first">Display</div>
+      <div class="toggle-row"><span>Interface size<small class="row-sub">Scales text and controls. Ctrl+Alt+= / Ctrl+Alt+- also work.</small></span><div class="scale-slot" id="scale-slot-drawer"></div></div>
+      <div class="drawer-section">Exclusions</div>
       <div id="excl-toggles"></div>
       <div class="field">
         <label for="excl-regex">Also ignore text matching</label>
@@ -419,11 +461,14 @@
     <div class="modal-body">
       <div class="help-title" id="help-title">Tallymark keyboard shortcuts</div>
       <div class="shortcuts" id="shortcuts"></div>
-      <div class="small muted">Press ? or click anywhere to close.</div>
+      <div class="help-foot"><span class="small muted">Press ? or click anywhere to close.</span><button class="btn btn-sm" id="help-tour"><svg class="i"><use href="#i-route"/></svg><span>Take the tour</span></button></div>
     </div>
   </div>
 </div>
 
-<script src="app.js?v=5"></script>
+<script src="layout-tools.js?v=6"></script>
+<script src="boc-view.js?v=6"></script>
+<script src="app.js?v=6"></script>
+<script src="tour.js?v=6"></script>
 </body>
 </html>

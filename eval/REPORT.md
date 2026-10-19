@@ -2,7 +2,7 @@
 
 Measured by `python -m tools.eval` on public NIST MBE PMI drawings with seeded changes. Model check off (rules only), so these numbers do not depend on an API key.
 
-| Metric | BRD target | Tier A: FTC-06, hand-verified GT | Tier B: unseen NIST drawings, reader-proposed GT |
+| Metric | Target | Tier A: FTC-06, hand-verified GT | Tier B: unseen NIST drawings, reader-proposed GT |
 | --- | --- | --- | --- |
 | Seeded recall | >= 90% | 100% | 98% |
 | Flag precision | >= 70% | 100% | 34% |
