@@ -51,6 +51,29 @@ Tallymark is that proof step, automated and explainable:
 
 ---
 
+## 👀 See it
+
+<p align="center">
+  <img src="docs/screenshots/results-light.png" alt="Results: the drawing faded, with only the unaccounted requirements lit, and the flag list on the right" width="900">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/start-light.png" alt="Start screen"><br><sub><b>Start:</b> what to load, what you get, an animated preview of a run</sub></td>
+    <td width="50%"><img src="docs/screenshots/flag-detail.png" alt="Flag detail"><br><sub><b>Flag detail:</b> what the BoC says, what's on the drawing, why it's flagged</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/covered.png" alt="Covered items"><br><sub><b>Covered:</b> every region a BoC row already accounts for, one click away</sub></td>
+    <td><img src="docs/screenshots/boc-viewer.png" alt="BoC viewer"><br><sub><b>View BoC:</b> the uploaded table with per-row status; click a row to jump to it</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/tour.png" alt="Guided tour"><br><sub><b>Guided tour</b> on first run, replayable from Help</sub></td>
+    <td><img src="docs/screenshots/results-dark.png" alt="Dark theme"><br><sub><b>Dark theme</b> on request (light by default)</sub></td>
+  </tr>
+</table>
+
+---
+
 ## 🚀 Quick start
 
 ```bash
@@ -159,7 +182,7 @@ scores the output (`python -m tools.eval` → [`eval/REPORT.md`](eval/REPORT.md)
 
 Honest reading: recall is strong; precision on unseen drawings is the weak spot. Most of that noise
 is garbled stacked tolerances, which is exactly what the model check exists to judge, and that has
-not been measured yet. 27 unit tests cover parsing (including Form 3), matching, request shapes for
+not been measured yet. The test suite covers parsing (including Form 3), matching, request shapes for
 all three providers and the failure paths: `python -m pytest -q`.
 
 ---
@@ -172,10 +195,13 @@ per flag.
 
 - **Start screen:** plain explainer, an animated preview of a run, hover help on each input showing what the file looks like.
 - **Results:** the drawing faded with covered regions grey and gaps lit in red; an **Original** toggle proves nothing was painted over; every flag states its rule and confidence.
-- **Review:** grouped decision buttons with keyboard shortcuts, undo, progress that turns green when done, exceptions export.
-- **For first-timers and long sessions:** guided tour, light/dark theme (light by default), interface size control, resizable side panels.
+- **Trust what was *not* flagged:** a **Covered** tab lists every region a BoC row accounts for, **Show covered** (<kbd>V</kbd>) outlines them on the drawing with their row number, and **View BoC** (<kbd>B</kbd>) opens the uploaded table with a status per row.
+- **Review:** grouped Confirm / Exclude / Dismiss buttons (<kbd>C</kbd> <kbd>E</kbd> <kbd>D</kbd>), undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>), next/previous (<kbd>J</kbd> <kbd>K</kbd>), per-sheet progress that turns green, exceptions export (<kbd>Ctrl</kbd>+<kbd>E</kbd>).
+- **Comfort for long sessions:** guided tour on first run (replay from Help), light theme by default with dark on request, interface size control (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>=</kbd> / <kbd>-</kbd>), resizable side panels, notices you can dismiss.
 
-Plain HTML, CSS and JS in [`frontend/`](frontend), no build step, served by FastAPI.
+Plain HTML, CSS and JS in [`frontend/`](frontend), no build step, served by FastAPI. The three
+add-on modules (guided tour, BoC viewer, layout tools) are self-contained files with standalone
+demo pages in [`frontend/dev/`](frontend/dev).
 
 ---
 
