@@ -139,6 +139,8 @@ Notes:
 - `credential_source` is `session`, `environment` or `null`. The key itself is never recorded.
 - `ocr.sheets[].cache_hit: true` means the text regions came from the OCR cache of an earlier run
   of the same file (same sha256 and pipeline version); `ms` is then the cache read time, not OCR time.
+- The full trace (and `audit.json`) also has `ai_links`: one entry per item the investigator tied to a
+  row, `{group_id, region_ids, text, claimed, ok, char_nos, note, checks}`, accepted or not.
 - In the summary, `llm_calls[]` has `call_id, job, provider, model, n_crops, input_tokens,
   output_tokens, latency_ms, cost_usd, error, stop_reason, url`.
 
@@ -222,7 +224,7 @@ Field reference:
 | `coverage.nearest_row` | Nearest located row on the sheet, for any region. |
 | `exclusion` | `applied` is the exclusion key, `label` its plain name, `detail` the zone (`{template, zone, center}`) or the `pattern` that matched. Covered regions are never checked. |
 | `classification` | The group this leftover belongs to, the rule outcome, and every rule check in evaluation order (`fired` / `matched_after` / `no_match`). `null` for covered or excluded regions. |
-| `model` | Only for ambiguous groups: `{status: verdict\|no_verdict\|not_sent, call_id, crop_index, provider, model, verdict, error}`. |
+| `model` | Only for ambiguous groups: `{status: verdict\|no_verdict\|not_sent, source: investigator\|single_shot, call_id, crop_index, provider, model, verdict, error}`. With the investigator: `steps` and `evidence`; when the investigator failed and the single shot answered, `investigation: {call_id, error, steps}`; when the verdict named covering rows, `link: {claimed, ok, char_nos, note, checks: [{char_no, requirement, sheet, sheet_ok, numbers_compatible, text_score, threshold, ok, why}]}`. |
 | `places` | nX checks run on this (covered) region: `{char_no, callout_places, recorded, recorded_field, shortfall, flag_id?, score?}`. |
 | `score` | `{base, locate_factor, locate_reason, llm_factor, llm_reason, threshold, product, band, basis, result, flag_id?, merged_into?}`. `result`: `flagged`, `below_threshold`, `dropped_by_model` or `merged`. |
 | `final` | `{outcome, label, flag_ids}`. `flag_ids` lists the flag this region is part of (or merged into). |
@@ -289,6 +291,13 @@ An ambiguous item the AI confirmed (mocked provider in the tests) has these AI a
 ]
 ```
 
+When the investigator handled the item, one `ai` step per tool call comes before the verdict step,
+titled `AI investigator S1: Searched the BoC` (label from `catalog.investigator_tools`), with the
+tool's one-line `result_summary` as `detail` and `{tool, args, ref, ok, ms, call_id, image_url}` as
+`data` (`image_url` is the zoom image for `zoom` steps). If the investigator named a covering row that
+failed run.py's check, the verdict step's detail and the flag's `reason` start with
+"Model thinks CN 41 covers this; text didn't match (CN 41: values differ)."
+
 When the AI check could not answer, step 5 is *AI check did not answer* with the error label
 (for example "Key rejected") and the score uses `llm_factor` 0.85.
 
@@ -299,6 +308,14 @@ optional `AI transcription (display only)` (ai) → `Score <n>: <band> confidenc
 ---
 
 ## AI call record (`/trace/llm/{call_id}`)
+
+An `investigate` record covers one whole investigator loop for one item (several requests): it adds
+`steps` (every tool call, `{n, ref, tool, args, result_summary, ms, ok, image_ref?}`), `turns` (per request:
+tokens, latency, stop reason, tool calls), `evidence` (refs the verdict cites), `raw_messages` (the
+sanitized transcript: no key, images as `[image crop]` / `[image S1]`) and `request.tool_schemas`.
+`raw_response_text` is `null` there (see `turns[].text`). Its `crops` are the images the model saw:
+index 0 is the crop (`ref: "crop"`), then one per zoom step (`ref: "S2"`...). `parsed` is the verdict,
+including `covered_by`.
 
 Call ids are `L1`, `L2`, ... in the order requests were sent; `job` is `classify` (is it a
 requirement?) or `transcribe` (display text for raised flags). A request carries up to 20 crops.
@@ -351,11 +368,12 @@ and `base`; bands carry `min`; checks carry `rule`). The UI should never show a 
 | `exclusions` | `title_block`, `border`, `revision_block`, `view_labels`, `reference_dims`, `scale_notes`, `basic_dims`, `custom_regex` |
 | `coverage_tests` | `location_gate`, `text_match`, `tight_overlap`, `blank_in_zone`, `blank_frame_gdt`, `row_best_region`, `relocated_by_text` |
 | `sources` | `ocr`, `ocr_rotated`, `text_layer`, `fcf_grid` |
-| `outcomes` | `covered`, `excluded`, `not_requirement`, `dropped_by_model`, `below_threshold`, `merged`, `flagged_unaccounted`, `flagged_places` |
+| `outcomes` | `covered`, `excluded`, `not_requirement`, `dropped_by_model`, `covered_by_investigator`, `below_threshold`, `merged`, `flagged_unaccounted`, `flagged_places` |
 | `bands` | `high` (≥ 0.8), `medium` (≥ 0.6), `low` (≥ 0.5), `none` (< 0.5, not flagged) |
 | `factors` | `base`, `locate_factor`, `llm_factor` |
 | `model_status` | `verdict`, `no_verdict`, `not_sent` |
-| `llm_jobs` | `classify`, `transcribe` |
+| `llm_jobs` | `investigate`, `classify`, `transcribe` |
+| `investigator_tools` | `zoom`, `nearby_rows`, `ocr_context`, `search_boc`, `submit_verdict` |
 | `llm_errors` | `disabled`, `no_credential`, `auth_failed`, `permission_denied`, `model_not_found`, `rate_limited`, `connection_failed`, `api_error`, `unexpected` (match `api_error_*` / `unexpected_*` by prefix) |
 | `step_kinds` | `measured`, `rule`, `ai`, `score` |
 | `stages` | `parse_boc`, `render`, `ocr`, `match`, `exclusions`, `rules`, `model_check`, `places`, `scoring`, `transcription` |
@@ -376,6 +394,7 @@ Example: `rules.R4 = {"label": "Feature control frame", "explain": "A tolerance 
 | `merged` | Its flag overlapped a stronger flag of the same class by more than 30% IoU, so only the stronger one is shown (`final.flag_ids` names it). |
 | `flagged_unaccounted` | Part of a U flag. |
 | `flagged_places` | Covered, and the callout's nX count is larger than the row's places/results (a P flag). |
+| `covered_by_investigator` | Ambiguous; the AI investigator named a BoC row that already states it (`covered_by`), and run.py's check agreed: the row exists, is on the same sheet, its values are compatible and its text reads like the item (`match_score` >= 70). Not flagged. Shown in `coverage.json` under `linked` with `"marker": "linked_by_ai"` so the UI can mark it "linked by AI, check". |
 
 Score: `product = base × llm_factor × locate_factor` (computed in that order, exactly as the
 pipeline does). `band` comes from `product` with the thresholds above.

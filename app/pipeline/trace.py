@@ -104,6 +104,8 @@ CATALOG = {
         "excluded": _e("Excluded", "Hidden by an exclusion (title block, labels, reference dimensions...)."),
         "not_requirement": _e("Not a requirement", "A rule decided this text is a label or prose."),
         "dropped_by_model": _e("Dropped by AI", "Ambiguous, and the AI check said it is not a requirement."),
+        "covered_by_investigator": _e("Linked by AI, check", "Ambiguous; the AI investigator found a BoC row that "
+                                      "already states it, and the row's text and values matched. Not flagged."),
         "below_threshold": _e("Below threshold", "Looked like a requirement but scored under 0.5, so it was not flagged."),
         "merged": _e("Merged", "Overlaps a stronger flag, so it is shown as part of that flag."),
         "flagged_unaccounted": _e("Flagged: no row", "A requirement no BoC row covers (a U flag)."),
@@ -125,7 +127,16 @@ CATALOG = {
         "no_verdict": _e("No answer", "The request was sent but no verdict came back for this crop."),
         "not_sent": _e("Not sent", "The AI check did not run for this crop."),
     },
+    "investigator_tools": {
+        "zoom": _e("Zoomed in", "Looked at a sharper, larger view of the same region."),
+        "nearby_rows": _e("Looked up nearby BoC rows", "Listed the BoC rows located near the region."),
+        "ocr_context": _e("Read the text around it", "Listed the OCR text next to the region."),
+        "search_boc": _e("Searched the BoC", "Searched every BoC row's requirement text."),
+        "submit_verdict": _e("Gave its verdict", "The investigator's final answer."),
+    },
     "llm_jobs": {
+        "investigate": _e("Investigation", "Ambiguous leftovers: the AI may call a few read-only tools (zoom, "
+                          "nearby rows, nearby text, BoC search) before its verdict. Capped steps, tokens and time."),
         "classify": _e("Is it a requirement?", "Ambiguous leftovers only. The answer can drop a candidate."),
         "transcribe": _e("Transcription", "Reads the text of raised flags with proper symbols. Display only, never decides."),
     },
@@ -400,6 +411,51 @@ class RunTrace:
             self.llm_calls.append({"call_id": cid, **raw, "crops": crop_list})
         return ids
 
+    def add_investigation(self, res, ctx, crop, ref: dict) -> str:
+        """One trace call record for a whole investigator loop (several requests): prompts, every tool
+        step, per-turn tokens, the sanitized transcript, and the images the model saw (crop + zooms)."""
+        from .investigate import DEFAULT_MAX_STEPS, MAX_TURN_TOKENS, SYSTEM, TOOLS, _intro, tool_zoom
+
+        cid = f"L{len(self.llm_calls) + 1}"
+        images = [("crop", crop)]
+        for st in res.steps:
+            if st.get("image_ref"):
+                try:
+                    images.append((st["image_ref"], tool_zoom(ctx, **(st.get("args") or {}))[1]))
+                except Exception:  # noqa: BLE001  a missing zoom image is reported by its absence only
+                    pass
+        crops = []
+        for i, (img_ref, im) in enumerate(images):
+            url = None
+            try:
+                store.put_trace_artifact(self.run_id, f"llm/{cid}/{i}.png", _png(im))
+                url = f"/runs/{self.run_id}/trace/llm/{cid}/crops/{i}.png"
+            except Exception:  # noqa: BLE001
+                pass
+            crops.append({"index": i, "input_index": None, "ref": img_ref, "url": url,
+                          **{k: v for k, v in ref.items() if not k.startswith("_")}})
+        intro = _intro(ctx, DEFAULT_MAX_STEPS)
+        self.llm_calls.append({
+            "call_id": cid, "job": "investigate", "provider": res.provider, "model": res.model,
+            "system_prompt": SYSTEM, "instruction": intro,
+            "user_content": [{"type": "image", "crop_index": 0}, {"type": "text", "text": intro}],
+            "request": {"max_steps": DEFAULT_MAX_STEPS, "max_tokens_per_turn": MAX_TURN_TOKENS,
+                        "tools": [t["name"] for t in TOOLS], "tool_schemas": TOOLS},
+            "crop_offset": 0, "n_crops": len(crops),
+            "raw_response_text": None,  # several turns: see turns[].text and raw_messages
+            "parsed": res.verdict.model_dump() if res.verdict is not None else None,
+            "input_tokens": res.input_tokens, "output_tokens": res.output_tokens, "latency_ms": res.latency_ms,
+            "cost_usd": res.cost_usd, "response_id": None,
+            "stop_reason": (res.turns[-1].get("stop") if res.turns else None), "error": res.error, "error_detail": None,
+            "steps": res.steps, "turns": res.turns, "evidence": res.evidence, "raw_messages": res.raw_messages,
+            "crops": crops})
+        return cid
+
+    def _crop_url(self, call_id: str | None, img_ref: str | None) -> str | None:
+        call = next((c for c in self.llm_calls if c["call_id"] == call_id), None)
+        crop = next((x for x in (call or {}).get("crops", []) if x.get("ref") == img_ref), None)
+        return crop.get("url") if crop else None
+
     def note_model(self, gid: str, rec: dict) -> None:
         self.model[gid] = rec
 
@@ -555,6 +611,8 @@ class RunTrace:
             step("ambiguous", "Ambiguous (asked the AI)", cls("ambiguous"), "leftover"),
             step("sent_to_model", "Sent to the AI check", sent, "ambiguous"),
             step("dropped_by_model", "Dropped by the AI check", by_outcome["dropped_by_model"], "ambiguous"),
+            step("covered_by_investigator", "Linked to a BoC row by the AI (check)",
+                 by_outcome["covered_by_investigator"], "ambiguous"),
             step("below_threshold", "Scored below 0.5", by_outcome["below_threshold"], "leftover"),
             step("merged", "Merged into a stronger flag", by_outcome["merged"], "leftover"),
             step("flagged_unaccounted", "Flagged: no row (U)", by_outcome["flagged_unaccounted"], "leftover",
@@ -594,6 +652,8 @@ class RunTrace:
             "places_checks": self.places_checks,
             "regions": region_records,
             "llm_calls": self.llm_calls,
+            "ai_links": [{"group_id": gid, "region_ids": groups[gid]["region_ids"], "text": groups[gid]["text"],
+                          **m["link"]} for gid, m in self.model.items() if m.get("link") and gid in groups],
             "flags": flag_records,
         }
 
@@ -650,13 +710,28 @@ class RunTrace:
                      "checks": g["checks"]})
 
         model = self.model.get(gid) if gid else None
+        if model is not None:
+            inv_steps = model.get("steps") or (model.get("investigation") or {}).get("steps") or []
+            inv_call = model.get("call_id") if model.get("source") == "investigator" else \
+                (model.get("investigation") or {}).get("call_id")
+            for st in inv_steps:
+                if st.get("tool") == "submit_verdict":
+                    continue
+                label = CATALOG["investigator_tools"].get(st.get("tool"), {}).get("label", st.get("tool"))
+                img = self._crop_url(inv_call, st.get("image_ref")) if st.get("image_ref") else None
+                add("ai", f"AI investigator {st.get('ref') or ''}: {label}".replace("  ", " "),
+                    st.get("result_summary") or "", {"tool": st.get("tool"), "args": st.get("args"), "ref": st.get("ref"),
+                                                     "ok": st.get("ok"), "ms": st.get("ms"), "call_id": inv_call,
+                                                     "image_url": img})
         if model is None:
             add("ai", "AI check not needed", "A rule decided this, so the AI was not asked.", {"status": "not_needed"})
         elif model["status"] == "verdict":
             v = model["verdict"]
+            link = model.get("link")
+            extra = f" {link['note']}" if link and not link.get("ok") and link.get("note") else ""
             add("ai", "AI check: it is a requirement" if v["is_requirement"] else "AI check: not a requirement",
                 f"{model['provider']} {model['model']} answered with {v['certainty']} certainty: \"{v['reason']}\" "
-                f"(read as \"{v['transcription']}\").", model)
+                f"(read as \"{v['transcription']}\")." + extra, model)
         else:
             err = model.get("error")
             label = CATALOG["llm_errors"].get(err or "", {}).get("label", err)

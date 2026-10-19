@@ -45,6 +45,7 @@ sets it). `TALLYMARK_SYNC=1` turns it on anywhere, which is how to try it locall
    | `TALLYMARK_BLOB_ACCESS` | Only for a public store | `private` (default) or `public`; must match the store. |
    | `TALLYMARK_BLOB_PREFIX` | Optional | Path prefix inside the store, default `tallymark/`. |
    | `TALLYMARK_BLOB` | Optional | `0` turns the Blob layer off even if a store is connected. |
+   | `TALLYMARK_INVESTIGATOR_BUDGET_S` | Optional | Total seconds per run for the AI investigator (default 60); items it can't reach fall back to the single-shot check. Keep it well under `maxDuration`. |
 
 3. **Create a Blob store** (recommended; without it results only live on the instance that made them).
    Storage, Create, Blob, choose **Private** (drawings and BoCs are customer documents; private stores

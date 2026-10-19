@@ -1,7 +1,10 @@
 """Orchestrates one check: drawing + BoC in, flags out. Reports stage progress to the store."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import os
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -12,10 +15,12 @@ import numpy as np
 from .. import store
 from ..pipeline.boc import Characteristic, parse_boc
 from .classify import classify_text, places_in, tidy_ocr_text
-from .coverage import decimals, locate_rows_without_bbox, nearest_row, subtract_coverage, text_similarity
+from .coverage import (decimals, locate_rows_without_bbox, match_score, nearest_row, numbers_compatible,
+                       subtract_coverage, text_similarity)
 from .exclusions import DEFAULT_EXCLUSIONS, apply_exclusions, pick_template
 from .geometry import Box, iou, union_box, union_poly, zone_label
-from .llm import DEFAULT_MODEL, DEFAULT_PROVIDER, classify_crops, cost_usd, crop_with_outline, transcribe_crops
+from .llm import (DEFAULT_MODEL, DEFAULT_PROVIDER, classify_crops, cost_usd, crop_with_outline, resolve_credential,
+                  transcribe_crops)
 from .trace import RunTrace
 from .regions import (
     VIEW_DPI,
@@ -41,6 +46,13 @@ STAGES = [
 ]
 FLAG_THRESHOLD = 0.5
 LLM_FACTOR = {"high": 1.0, "medium": 0.75, "low": 0.5}
+# Investigator (bounded tool loop) for ambiguous items. Total wall time per run is capped so a run fits a
+# serverless request; items it can't finish fall back to the single-shot check.
+INVESTIGATOR_MAX_ITEMS = 15
+INVESTIGATOR_WORKERS = 4
+INVESTIGATOR_TOTAL_S = float(os.environ.get("TALLYMARK_INVESTIGATOR_BUDGET_S", "60"))
+INVESTIGATOR_FATAL = {"auth_failed", "permission_denied", "model_not_found", "no_credential"}
+LINK_MIN = 70  # match_score a claimed covering row's requirement must reach against the item's OCR text
 
 
 @dataclass
@@ -53,6 +65,7 @@ class RunOptions:
     credential: str | None = None
     skip_sheets: list[int] = field(default_factory=list)
     simulated: bool = False
+    investigator: bool | None = None  # None = on whenever the model check runs with a key
 
 
 class StageError(Exception):
@@ -74,6 +87,7 @@ def new_run_doc(run_id: str, created_at: str, drawing_meta: dict, boc_meta: dict
         "extra_regex": opts.extra_regex,
         "model": opts.model if opts.use_llm else None,
         "provider": opts.provider if opts.use_llm else None,
+        "investigator": _investigator_enabled(opts) if opts.use_llm else None,
         "skip_sheets": opts.skip_sheets,
         "stages": [{"key": k, "name": n, "status": "pending", "count": None, "ms": None} for k, n in STAGES],
         "stats": {},
@@ -271,28 +285,71 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             g = c["group"]
             poly, box = _group_outline(g)
             crops.append(crop_with_outline(work[g[0].sheet], poly, box))
+        refs = [{"group_id": c["gid"], "region_ids": [x.region_id for x in c["group"]]} for c in ambiguous]
+        for c in ambiguous:
+            c["llm"] = None
+        investigations: dict[int, tuple] = {}
+        fatal = None
+        if _investigator_enabled(opts):
+            _stage(run_id, "classify", "running",
+                   detail=f"investigating {min(len(ambiguous), INVESTIGATOR_MAX_ITEMS)} items")
+            done, fatal, inv_info = _investigate_all(ambiguous, work, rows, regions, page, opts)
+            for i, (ctx, ires) in sorted(done.items()):
+                llm_stats["llm_calls"] += ires.calls
+                llm_stats["llm_input_tokens"] += ires.input_tokens
+                llm_stats["llm_output_tokens"] += ires.output_tokens
+                if ires.verdict is not None:
+                    ambiguous[i]["llm"] = ires.verdict
+                investigations[i] = (ires, tr.add_investigation(ires, ctx, crops[i], refs[i]))
+            llm_stats["investigator"] = inv_info
+        # single shot for everything the investigator did not settle (all of it when the investigator is off)
+        pending = [i for i, c in enumerate(ambiguous) if c["llm"] is None]
         raw_calls: list[dict] = []
-        res = classify_crops(crops, opts.credential, opts.model, opts.provider, trace_calls=raw_calls)
-        llm_stats.update(llm_calls=res.calls, llm_input_tokens=res.input_tokens, llm_output_tokens=res.output_tokens,
-                         cost_usd=cost_usd(opts.model, res.input_tokens, res.output_tokens), llm_error=res.error)
+        call_ids: list[str] = []
+        res = None
+        if pending and not fatal:
+            sub = [crops[i] for i in pending]
+            res = classify_crops(sub, opts.credential, opts.model, opts.provider, trace_calls=raw_calls)
+            llm_stats["llm_calls"] += res.calls
+            llm_stats["llm_input_tokens"] += res.input_tokens
+            llm_stats["llm_output_tokens"] += res.output_tokens
+            for k, i in enumerate(pending):
+                ambiguous[i]["llm"] = res.verdicts.get(k)
+            call_ids = tr.add_llm_calls(raw_calls, sub, [refs[i] for i in pending])
+        llm_stats["cost_usd"] = cost_usd(opts.model, llm_stats["llm_input_tokens"], llm_stats["llm_output_tokens"])
+        llm_stats["llm_error"] = fatal or (res.error if res is not None else None)
         for i, c in enumerate(ambiguous):
-            c["llm"] = res.verdicts.get(i)
-        call_ids = tr.add_llm_calls(raw_calls, crops, [{"group_id": c["gid"], "region_ids": [x.region_id for x in c["group"]]}
-                                                       for c in ambiguous])
-        for i, c in enumerate(ambiguous):
-            call = next((tr.llm_calls[-len(raw_calls) + k] for k, rc in enumerate(raw_calls)
-                         if rc["crop_offset"] <= i < rc["crop_offset"] + rc["n_crops"]), None)
             v = c["llm"]
-            tr.note_model(c["gid"], {
-                "status": "verdict" if v is not None else ("no_verdict" if call is not None else "not_sent"),
-                "call_id": call["call_id"] if call else None,
-                "crop_index": i - call["crop_offset"] if call else None,
-                "provider": opts.provider, "model": opts.model,
-                "verdict": v.model_dump() if v is not None else None,
-                "error": None if v is not None else ((call or {}).get("error") or res.error)})
-        st["out"] = {"calls": len(call_ids), "answered": sum(1 for c in ambiguous if c["llm"] is not None),
-                     "said_not_requirement": sum(1 for c in ambiguous if c["llm"] is not None and not c["llm"].is_requirement)}
-        st["detail"] = {"error": res.error}
+            inv = investigations.get(i)
+            rec = {"provider": opts.provider, "model": opts.model}
+            if inv is not None and inv[0].verdict is not None:
+                ires, inv_id = inv
+                rec.update(status="verdict", source="investigator", call_id=inv_id, crop_index=0,
+                           verdict=v.model_dump(), error=None, steps=ires.steps, evidence=ires.evidence)
+            else:
+                k = pending.index(i) if i in pending else None
+                call = None
+                if k is not None:
+                    call = next((tr.llm_calls[[x["call_id"] for x in tr.llm_calls].index(cid)]
+                                 for cid, rc in zip(call_ids, raw_calls)
+                                 if rc["crop_offset"] <= k < rc["crop_offset"] + rc["n_crops"]), None)
+                rec.update(status="verdict" if v is not None else ("no_verdict" if call is not None else "not_sent"),
+                           source="single_shot", call_id=call["call_id"] if call else None,
+                           crop_index=k - call["crop_offset"] if call else None,
+                           verdict=v.model_dump() if v is not None else None,
+                           error=None if v is not None else ((call or {}).get("error") or fatal or (res.error if res else None)))
+                if inv is not None:
+                    rec["investigation"] = {"call_id": inv[1], "error": inv[0].error, "steps": inv[0].steps}
+            claim = [str(x) for x in (getattr(v, "covered_by", None) or [])]
+            if v is not None and v.is_requirement and claim:
+                c["link"] = _check_link(claim, c["text"], c["group"][0].sheet, rows)
+                rec["link"] = c["link"]
+            tr.note_model(c["gid"], rec)
+        st["out"] = {"calls": len(call_ids) + len(investigations), "investigated": len(investigations),
+                     "answered": sum(1 for c in ambiguous if c["llm"] is not None),
+                     "said_not_requirement": sum(1 for c in ambiguous if c["llm"] is not None and not c["llm"].is_requirement),
+                     "linked_to_rows": sum(1 for c in ambiguous if (c.get("link") or {}).get("ok"))}
+        st["detail"] = {"error": llm_stats["llm_error"]}
     elif ambiguous:
         llm_stats["llm_error"] = "disabled"
     if ambiguous and not opts.use_llm:
@@ -348,6 +405,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
     st_score = tr.stage("scoring")
     st = st_score.__enter__()
     flags = []
+    linked = []  # ambiguous items the investigator tied to an existing row, and the check agreed
     no_bbox = not boc.has_bbox
     for c in candidates:
         g, v = c["group"], c["verdict"]
@@ -363,6 +421,13 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
                 "nearest_char_no": near.char_no if near is not None else None,
                 "llm_factor": 1.0, "llm_reason": "a rule decided", "threshold": FLAG_THRESHOLD}
         if v.outcome == "ambiguous":
+            link = c.get("link")
+            if llm is not None and link and link["ok"]:
+                tr.note_score(c["gid"], {**srec, "llm_factor": None, "product": None, "band": "none",
+                                         "llm_reason": f"AI linked it to CN {', '.join(link['char_nos'])}",
+                                         "basis": "model judged", "result": "covered_by_investigator"}, None)
+                linked.append(c)
+                continue
             if llm is not None:
                 if not llm.is_requirement:
                     llm_stats["model_rejected"] += 1
@@ -373,7 +438,12 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
                 srec.update(llm_factor=LLM_FACTOR[llm.certainty], llm_reason=f"AI certainty {llm.certainty}")
                 score = v.base * LLM_FACTOR[llm.certainty] * locate_factor
                 basis = "model judged"
+                n_tools = sum(1 for x in (c.get("investigation_steps") or []) if x.get("tool") != "submit_verdict")
+                if n_tools > 1:
+                    basis = f"model judged after {n_tools} tool steps"
                 reason = f"Looks like a requirement: {llm.reason.rstrip('.')}. No row covers it."
+                if link and not link["ok"]:
+                    reason = f"{link['note']} {reason}"
                 kind = llm.kind if llm.kind != "none" else kind
                 title = {"dimension": "Dimension, no row", "gdt": "Geometric tolerance, no characteristic",
                          "note": "Note, no characteristic", "spec": "Specification reference, no row"}.get(kind, title)
@@ -470,6 +540,8 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         "places": counters["places"],
         **llm_stats,
     }
+    if linked:
+        stats["linked_by_ai"] = len(linked)
     warnings = []
     sheets_with_rows = {r.sheet for r in rows}
     for n in sheets:
@@ -490,6 +562,12 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
                          "char_nos": r.covered_by} for r in regions if r.sheet == n and r.covered_by],
             "excluded": [{"poly": r.to_dict()["poly"], "bbox": r.bbox.to_dict(), "text": r.text,
                           "rule": r.excluded_by} for r in regions if r.sheet == n and r.excluded_by],
+            # linked by the AI investigator to an existing row (not flagged); the UI should mark these "check"
+            "linked": [{"poly": [[round(p[0], 5), round(p[1], 5)] for p in _group_outline(c["group"])[0]],
+                        "bbox": _group_outline(c["group"])[1].to_dict(), "text": c["text"],
+                        "char_nos": c["link"]["char_nos"], "group_id": c["gid"],
+                        "region_ids": [x.region_id for x in c["group"]], "marker": "linked_by_ai"}
+                       for c in linked if c["group"][0].sheet == n],
         }
     store.write_file(rdir / "coverage.json", json.dumps(overlay))
 
@@ -524,6 +602,85 @@ def _sheet_read(n: int, cache_hit: bool, t0: float, regs: list[Region]) -> dict:
     return {"sheet": n, "cache_hit": cache_hit, "ms": _ms(t0), "regions": len(regs), "by_origin": origins,
             "with_text_layer": sum(1 for r in regs if "text_layer" in r.sources),
             "with_frame": sum(1 for r in regs if r.fcf_cells)}
+
+
+def _investigator_enabled(opts: RunOptions) -> bool:
+    """On by default when the model check runs and a key is available; an explicit False turns it off."""
+    if not opts.use_llm or opts.investigator is False:
+        return False
+    return resolve_credential(opts.provider, opts.credential)[0] is not None
+
+
+def _investigate_all(ambiguous: list[dict], work: dict, rows, regions, page, opts: RunOptions):
+    """Run the investigator on up to INVESTIGATOR_MAX_ITEMS ambiguous items, a few at a time, inside a total
+    time budget. Returns ({index: (ctx, result)}, fatal_error_code | None, info). Never raises."""
+    from .investigate import context_for_group, investigate
+
+    page_mm = (page.width / 72 * 25.4, page.height / 72 * 25.4)
+    deadline = time.perf_counter() + INVESTIGATOR_TOTAL_S
+    stop = threading.Event()
+    fatal: list[str] = []
+    done: dict[int, tuple] = {}
+
+    def one(i: int):
+        remaining = deadline - time.perf_counter()
+        if stop.is_set() or remaining < 5:
+            return None
+        c = ambiguous[i]
+        g = c["group"]
+        poly, box = _group_outline(g)
+        ctx = context_for_group(c["gid"], g, c["text"], c["verdict"].reason, poly, box, work[g[0].sheet], rows,
+                                regions, page_mm, zone_label(box.center))
+        res = investigate(ctx, opts.provider, opts.credential, opts.model, timeout_s=min(90.0, remaining))
+        if res.error in INVESTIGATOR_FATAL:
+            fatal.append(res.error)
+            stop.set()
+        return ctx, res
+
+    t0 = time.perf_counter()
+    targets = list(range(min(len(ambiguous), INVESTIGATOR_MAX_ITEMS)))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=INVESTIGATOR_WORKERS) as pool:
+            for i, out in zip(targets, pool.map(one, targets)):
+                if out is not None:
+                    done[i] = out
+                    ambiguous[i]["investigation_steps"] = out[1].steps
+    except Exception:  # noqa: BLE001  the investigator never fails a run; the single shot takes over
+        traceback.print_exc()
+    info = {"items": len(targets), "investigated": len(done),
+            "verdicts": sum(1 for _, r in done.values() if r.verdict is not None),
+            "skipped_over_budget": len(targets) - len(done) if not fatal else 0,
+            "not_investigated": max(0, len(ambiguous) - len(targets)),
+            "ms": int((time.perf_counter() - t0) * 1000), "budget_s": INVESTIGATOR_TOTAL_S,
+            "errors": sorted({r.error for _, r in done.values() if r.error})}
+    return done, (fatal[0] if fatal else None), info
+
+
+def _check_link(claim: list[str], text: str, sheet: int, rows: list[Characteristic]) -> dict:
+    """Check the investigator's claim that BoC rows already account for this text: the row must exist, be on
+    the same sheet, carry compatible values and read like the text (match_score >= LINK_MIN)."""
+    by_cn = {r.char_no: r for r in rows}
+    checks = []
+    for cn in claim:
+        row = by_cn.get(cn)
+        if row is None:
+            checks.append({"char_no": cn, "ok": False, "why": "no such row in the BoC"})
+            continue
+        compat = numbers_compatible(decimals(row.requirement), text)
+        score = round(match_score(row.requirement, text), 1)
+        sheet_ok = row.sheet == sheet
+        why = None if (sheet_ok and compat and score >= LINK_MIN) else (
+            f"row is on sheet {row.sheet}" if not sheet_ok else
+            "values differ" if not compat else f"text only {score:.0f}% alike (needs {LINK_MIN}%)")
+        checks.append({"char_no": cn, "requirement": row.requirement, "sheet": row.sheet, "sheet_ok": sheet_ok,
+                       "numbers_compatible": compat, "text_score": score, "threshold": LINK_MIN,
+                       "ok": why is None, "why": why})
+    ok = [x["char_no"] for x in checks if x["ok"]]
+    note = None
+    if not ok:
+        reasons = "; ".join(f"CN {x['char_no']}: {x['why']}" for x in checks)
+        note = f"Model thinks CN {', '.join(claim)} covers this; text didn't match ({reasons})."
+    return {"claimed": claim, "checks": checks, "ok": bool(ok), "char_nos": ok, "note": note}
 
 
 def _join_fragments(group: list[Region]) -> str:

@@ -171,7 +171,52 @@ class InvestigationResult:
 `credential` is resolved with `llm.resolve_credential`, so a session key wins over the environment, as
 it does everywhere else.
 
-## Wiring it into run.py
+## How run.py uses it (wired 2026-10-19)
+
+- Setting: `RunOptions.investigator` (`None` = on whenever the model check runs and a key resolves for
+  the provider; `False` = off). The server keeps a default in `GET/PUT /settings` (`investigator`), and
+  `POST /runs` accepts an `investigator` form field. With no key it never starts, so rules-only runs and
+  `python -m tools.eval` are unchanged.
+- Up to `INVESTIGATOR_MAX_ITEMS` (15) ambiguous items, 4 at a time, inside a total budget of
+  `TALLYMARK_INVESTIGATOR_BUDGET_S` seconds per run (default 60, so a run fits a serverless request).
+  An item that would start with under 5 s left is skipped. Each item's own timeout is the time left
+  (at most 90 s).
+- Items without a verdict (any error, budget, cap) go to the single-shot `classify_crops`, unchanged.
+  `auth_failed`, `permission_denied`, `model_not_found` and `no_credential` stop the investigator and
+  skip the single shot too (it would fail the same way); `stats.llm_error` carries the code.
+- `stats.investigator` = `{items, investigated, verdicts, skipped_over_budget, not_investigated, ms,
+  budget_s, errors}`; the flag basis becomes "model judged after N tool steps" when N > 1.
+- Decision trace: one `investigate` call record per item (steps, turns, transcript, crop and zoom
+  images); the item's region records carry `model.source = "investigator"` and the steps; a flag's
+  timeline shows one `ai` step per tool call. See docs/TRACE.md.
+
+### "Already covered by row X": `covered_by`
+
+`submit_verdict` has a `covered_by` list (char_no of rows that already state the requirement; `[]`
+when none). The system prompt tells the model to use it when `nearby_rows` or `search_boc` returned a
+row with the same value, tolerance and datums, and to cite that step in `evidence`. The harness
+rejects (one repair turn) a `covered_by` that names a row no cited `nearby_rows`/`search_boc` step
+returned, or that comes with `is_requirement=false`. The verdict is an `InvestigatedVerdict`
+(a `CropVerdict` subclass with `covered_by`), so scoring still reads it unchanged; the single-shot
+schema is untouched.
+
+run.py then checks the claim (`_check_link`): the row exists, is on the item's sheet, its decimal
+values are compatible with the OCR text (`coverage.numbers_compatible`) and `coverage.match_score`
+is at least `LINK_MIN` (70; coverage relocation uses 80). If one claimed row passes, the item is not
+flagged: its outcome is `covered_by_investigator`, it is listed in `coverage.json` under `linked`
+(`"marker": "linked_by_ai"`) and in `stats.linked_by_ai`, and the trace keeps every check with its
+score. If none passes, the flag stays and its reason starts with "Model thinks CN 41 covers this;
+text didn't match (...)".
+
+Note on the live run that prompted this (FTC-06 with `ftc06_boc_simulated_nobbox.csv`, 6 flags):
+U-4 and U-5 there are **rule-decided R4 frames**, not ambiguous items, so neither the single-shot
+check nor the investigator ever judged them. Their real cause is coverage relocation for rows
+without a location: row 39 (`⌓ .01 D 2 SURFACES`, places 2) was placed on the `2SURFACES` text
+(score 95) instead of the `.01D` frame, and row 38 (`⌓ .05 D B C`) found no region above the
+relocation threshold (OCR splits the frame into `.05` / `DBC` fragments). `covered_by` helps when
+such an item is ambiguous; the R4 case needs a coverage fix (see the lead's report).
+
+## Original wiring sketch
 
 Put it behind a setting, **`investigator: on|off`**: `RunOptions.investigator: bool`, default on
 when a key is resolved for the provider, and exposed in Settings next to the model check. It only
@@ -264,7 +309,5 @@ as they do for the single-shot check.
   follows.
 - SDK retries (default 2 on 429 and 5xx) stay as the clients define them, so a rate-limited request can
   use up to 3 attempts within the timeout.
-- The verdict schema has no "already covered by row X" field. If the model finds that a nearby row
-  holds the same value, it says so in `reason` and `evidence`, but run.py can't yet act on it. A
-  future `duplicate_of` field could let scoring downgrade such a flag instead of dropping or keeping
-  it.
+- `covered_by` (above) is only acted on after run.py's own text check; a model claim alone never
+  removes a flag.

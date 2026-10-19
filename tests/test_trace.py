@@ -22,7 +22,7 @@ PDF = SAMPLES / "nist_ftc_06_asme1_rd.pdf"
 
 
 def _check(boc: Path, use_llm: bool = False, credential: str | None = None, provider: str = "anthropic",
-           model: str = "claude-sonnet-5") -> dict:
+           model: str = "claude-sonnet-5", investigator: bool | None = False) -> dict:
     from tools.check import run_check
 
     if credential is None:
@@ -31,7 +31,8 @@ def _check(boc: Path, use_llm: bool = False, credential: str | None = None, prov
     import uuid
 
     d, b = PDF.read_bytes(), boc.read_bytes()
-    opts = run.RunOptions(use_llm=use_llm, credential=credential, provider=provider, model=model)
+    opts = run.RunOptions(use_llm=use_llm, credential=credential, provider=provider, model=model,
+                          investigator=investigator)
     run_id = f"test_{uuid.uuid4().hex[:8]}"
     doc = run.new_run_doc(run_id, dt.datetime.now(dt.timezone.utc).isoformat(),
                           {"filename": PDF.name, "sha256": store.sha256(d)},

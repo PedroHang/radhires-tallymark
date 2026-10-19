@@ -52,7 +52,9 @@ SAMPLE_FILES = {"drawing": "nist_ftc_06_asme1_rd.pdf", "boc": "ftc06_boc_simulat
 # Keys live in server memory (or .env / environment), one per provider. They are never written to run docs.
 _settings = {"provider": DEFAULT_PROVIDER,
              "credentials": {p: None for p in PROVIDERS},
-             "models": {p: cfg["models"][0] for p, cfg in PROVIDERS.items()}}
+             "models": {p: cfg["models"][0] for p, cfg in PROVIDERS.items()},
+             # bounded tool loop for ambiguous items (docs/INVESTIGATOR.md); only runs with the model check and a key
+             "investigator": True}
 
 
 def _load_env_file() -> None:
@@ -166,6 +168,7 @@ class SettingsIn(BaseModel):
     credential: str | None = None
     model: str | None = None
     clear_credential: bool = False
+    investigator: bool | None = None
 
 
 def _provider_status(p: str) -> dict:
@@ -191,6 +194,7 @@ def get_settings():
         "credential_set": active["credential_set"],
         "credential_kind": active["credential_kind"],
         "credential_source": active["credential_source"],
+        "investigator": _settings["investigator"],
         "exclusions": [{"key": k, "label": v, "default": k in DEFAULT_EXCLUSIONS} for k, v in EXCLUSION_LABELS.items()],
     }
 
@@ -211,6 +215,8 @@ def put_settings(body: SettingsIn):
         _settings["credentials"][p] = None
     if body.model:
         _settings["models"][p] = body.model
+    if body.investigator is not None:
+        _settings["investigator"] = body.investigator
     return get_settings()
 
 
@@ -246,6 +252,7 @@ async def create_run(
     use_llm: bool = Form(True),
     skip_sheets: str | None = Form(None),
     simulated: bool | None = Form(None),
+    investigator: bool | None = Form(None),
     x_tallymark_key: str | None = Header(None),
     x_tallymark_provider: str | None = Header(None),
     x_tallymark_model: str | None = Header(None),
@@ -277,6 +284,7 @@ async def create_run(
         credential=llm_cred,
         skip_sheets=json.loads(skip_sheets) if skip_sheets else [],
         simulated=simulated if simulated is not None else "simulated" in b_meta["filename"].lower(),
+        investigator=investigator if investigator is not None else _settings["investigator"],
     )
     run_id = f"run_{dt.datetime.now().strftime('%Y-%m-%d')}_{uuid.uuid4().hex[:6]}"
     doc = new_run_doc(run_id, _now(), d_meta, b_meta, opts)
