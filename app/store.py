@@ -3,20 +3,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
-UPLOADS = DATA / "uploads"
-RUNS = DATA / "runs"
-CACHE = DATA / "cache"
-DB_PATH = DATA / "runs.sqlite3"
+DATA = UPLOADS = RUNS = CACHE = DB_PATH = None  # set by configure()
 
-for d in (UPLOADS, RUNS, CACHE):
-    d.mkdir(parents=True, exist_ok=True)
+
+def default_data_dir() -> Path:
+    """TALLYMARK_DATA_DIR if set, /tmp/tallymark on Vercel (only /tmp is writable), else ./data."""
+    env = os.environ.get("TALLYMARK_DATA_DIR")
+    if env:
+        return Path(env)
+    if os.environ.get("VERCEL"):
+        return Path("/tmp/tallymark")
+    return ROOT / "data"
+
+
+def configure(base: str | Path | None = None) -> Path:
+    """Point every store path at `base` (tests use a temporary directory). Returns the base."""
+    global DATA, UPLOADS, RUNS, CACHE, DB_PATH
+    DATA = Path(base) if base else default_data_dir()
+    UPLOADS, RUNS, CACHE, DB_PATH = DATA / "uploads", DATA / "runs", DATA / "cache", DATA / "runs.sqlite3"
+    for d in (UPLOADS, RUNS, CACHE):
+        d.mkdir(parents=True, exist_ok=True)
+    return DATA
+
+
+configure()
 
 _lock = threading.Lock()
 
@@ -91,6 +108,36 @@ def list_runs(limit: int = 20) -> list[dict]:
         doc = json.loads(d)
         out.append({k: doc.get(k) for k in ("run_id", "created_at", "status", "drawing", "boc", "stats")})
     return out
+
+
+# --------------------------------------------------------------------------- decision trace
+# The trace is one JSON document plus small binary artifacts (model crops) per run. Everything
+# goes through these functions so the backing store can change without touching callers.
+TRACE_FILE = "trace.json"
+
+
+def put_trace(run_id: str, trace: dict) -> None:
+    (run_dir(run_id) / TRACE_FILE).write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+
+
+def get_trace(run_id: str) -> dict | None:
+    p = RUNS / Path(run_id).name / TRACE_FILE
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+def put_trace_artifact(run_id: str, name: str, data: bytes) -> None:
+    """name is a relative path such as 'llm/L1/0.png'."""
+    p = run_dir(run_id) / "trace" / Path(name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+
+
+def get_trace_artifact(run_id: str, name: str) -> bytes | None:
+    base = (RUNS / Path(run_id).name / "trace").resolve()
+    p = (base / name).resolve()
+    if base not in p.parents or not p.is_file():
+        return None
+    return p.read_bytes()
 
 
 def delete_run(run_id: str) -> bool:

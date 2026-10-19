@@ -58,10 +58,11 @@ def match_score(requirement: str, region_text: str) -> float:
     return score
 
 
-def locate_rows_without_bbox(rows: list[Characteristic], regions: list[Region]) -> int:
+def locate_rows_without_bbox(rows: list[Characteristic], regions: list[Region], placements: list | None = None) -> int:
     """Global greedy assignment: best (row, region) pairs first, each row placed once.
     A region hosts a second row only when it holds more text than that row (one callout
-    line carrying both counterbore diameter and depth, for example)."""
+    line carrying both counterbore diameter and depth, for example).
+    placements: when a list, each placement is appended as {char_no, region_id, score} (trace only)."""
     pairs = []
     for row in rows:
         if row.bbox is not None:
@@ -74,20 +75,25 @@ def locate_rows_without_bbox(rows: list[Characteristic], regions: list[Region]) 
     pairs.sort(key=lambda p: -p[0])
     placed: set[int] = set()
     hosted: set[str] = set()
-    for _, row, reg in pairs:
+    for s, row, reg in pairs:
         if id(row) in placed:
             continue
         if reg.region_id in hosted and len(normalize_text(reg.text)) <= len(normalize_text(row.requirement)) + 2:
             continue
         row.bbox = reg.bbox
         row.bbox_source = "text_match"
+        if placements is not None:
+            placements.append({"char_no": row.char_no, "region_id": reg.region_id, "score": round(s, 1)})
         placed.add(id(row))
         hosted.add(reg.region_id)
     return len(placed)
 
 
-def subtract_coverage(rows: list[Characteristic], regions: list[Region], aspect: float = 612 / 792) -> dict[str, int]:
-    """Marks region.covered_by in place. Returns per-row covered region counts."""
+def subtract_coverage(rows: list[Characteristic], regions: list[Region], aspect: float = 612 / 792,
+                      trace: dict | None = None) -> dict[str, int]:
+    """Marks region.covered_by in place. Returns per-row covered region counts.
+    trace: when a dict, every (row, region) pair that passed the location gate is recorded under
+    trace[region_id] with the measured values and which test, if any, made it cover (trace only)."""
     counts: dict[str, int] = {}
     for row in rows:
         if row.bbox is None:
@@ -96,6 +102,7 @@ def subtract_coverage(rows: list[Characteristic], regions: list[Region], aspect:
         candidates = [r for r in regions if r.sheet == row.sheet]
         best, best_key = None, (False, -1.0, -1.0)
         hits = []
+        entries: dict[str, dict] = {}
         row_decimals = decimals(row.requirement)
         for reg in candidates:
             ov = overlap_ratio(reg.bbox, zone)
@@ -109,13 +116,28 @@ def subtract_coverage(rows: list[Characteristic], regions: list[Region], aspect:
                 best, best_key = reg, key
             # fragment of this row's text (OCR split one callout into pieces). Values must agree:
             # fuzzy text alone lets '12.00 ±.01' cover a neighbouring '.012' frame.
+            why = None
             if compat and (sim >= 60 or (ov >= 0.9 and sim >= 40)):
                 hits.append(reg)
+                why = ("text_match" if reg.text else "blank_in_zone") if sim >= 60 else "tight_overlap"
             elif not reg.text and reg.fcf_cells and row.char_type == "gdt":
                 hits.append(reg)
+                why = "blank_frame_gdt"
+            if trace is not None:
+                rx, ry = row.bbox.center
+                cx, cy = reg.bbox.center
+                entries[reg.region_id] = {
+                    "char_no": row.char_no, "requirement": row.requirement, "row_bbox_source": row.bbox_source,
+                    "overlap": round(ov, 3), "center_in_zone": center_in,
+                    "distance_pw": round(((cx - rx) ** 2 + ((cy - ry) * aspect) ** 2) ** 0.5, 5),
+                    "text_similarity": round(sim, 1), "text_blank": not reg.text,
+                    "numbers_compatible": compat, "passed": why is not None, "passed_by": why}
+                trace.setdefault(reg.region_id, []).append(entries[reg.region_id])
         # the row's own location always covers its best region, even if OCR garbled the text
         if best is not None and best not in hits and overlap_ratio(best.bbox, zone) >= 0.5 and best_key[1] >= 30:
             hits.append(best)
+            if trace is not None:
+                entries[best.region_id].update(passed=True, passed_by="row_best_region")
         for reg in hits:
             if row.char_no not in reg.covered_by:
                 reg.covered_by.append(row.char_no)

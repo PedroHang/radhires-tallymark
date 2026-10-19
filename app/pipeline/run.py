@@ -16,6 +16,7 @@ from .coverage import decimals, locate_rows_without_bbox, nearest_row, subtract_
 from .exclusions import DEFAULT_EXCLUSIONS, apply_exclusions, pick_template
 from .geometry import Box, iou, union_box, union_poly, zone_label
 from .llm import DEFAULT_MODEL, DEFAULT_PROVIDER, classify_crops, cost_usd, crop_with_outline, transcribe_crops
+from .trace import RunTrace
 from .regions import (
     VIEW_DPI,
     WORK_DPI,
@@ -107,13 +108,24 @@ def _cache_dir(sha: str):
 
 
 def execute(run_id: str, drawing: bytes, drawing_name: str, boc_bytes: bytes, boc_name: str, opts: RunOptions) -> None:
+    tr = RunTrace(run_id, opts, drawing, drawing_name, boc_bytes, boc_name, PIPELINE_VERSION)
     try:
-        _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts)
+        _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts, tr)
     except StageError as e:
         _fail(run_id, e.stage, e.sheet, e.message)
+        _save_partial_trace(run_id, tr, {"stage": e.stage, "sheet": e.sheet, "message": e.message})
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         _fail(run_id, None, None, f"{type(e).__name__}: {e}")
+        _save_partial_trace(run_id, tr, {"stage": None, "sheet": None, "message": f"{type(e).__name__}: {e}"})
+
+
+def _save_partial_trace(run_id: str, tr: RunTrace, error: dict) -> None:
+    try:
+        store.put_trace(run_id, tr.partial(error))
+        store.update_run(run_id, lambda d: d.update(trace={"available": True, "partial": True}))
+    except Exception:  # noqa: BLE001  the trace never changes how a run ends
+        traceback.print_exc()
 
 
 def _fail(run_id: str, stage: str | None, sheet: int | None, message: str) -> None:
@@ -129,16 +141,20 @@ def _fail(run_id: str, stage: str | None, sheet: int | None, message: str) -> No
     store.update_run(run_id, fn)
 
 
-def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOptions) -> None:
+def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOptions, tr: RunTrace) -> None:
     rdir = store.run_dir(run_id)
     sha = store.sha256(drawing)
     cache = _cache_dir(sha)
-    boc = parse_boc(boc_bytes, boc_name)
+    with tr.stage("parse_boc") as st:
+        boc = parse_boc(boc_bytes, boc_name)
+        st["out"] = {"rows": len(boc.rows), "skipped_warnings": len(boc.warnings)}
     rows = boc.rows
 
     # 1. render ---------------------------------------------------------------
     t0 = time.perf_counter()
     _stage(run_id, "render", "running")
+    st_render = tr.stage("render")
+    st = st_render.__enter__()
     doc = open_drawing(drawing, drawing_name)
     sheets = [i + 1 for i in range(doc.page_count) if (i + 1) not in opts.skip_sheets]
     page = doc[0].rect
@@ -166,15 +182,24 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         "sheets_checked": sheets,
     }))
     _stage(run_id, "render", "done", count=f"{len(sheets)} of {doc.page_count}", ms=_ms(t0))
+    st.update({"in": {"sheets": doc.page_count, "skipped": list(opts.skip_sheets)}, "out": {"rendered": len(sheets)},
+               "detail": {"work_dpi": WORK_DPI, "view_dpi": VIEW_DPI, "cache": cache.name}})
+    st_render.__exit__(None, None, None)
+    tr.set_page(page.width, page.height, template.name, doc.page_count, sheets, boc)
 
     # 2. text regions -----------------------------------------------------------
     t0 = time.perf_counter()
     _stage(run_id, "text_regions", "running")
     regions: list[Region] = []
+    ocr_sheets: list[dict] = []
+    st_ocr = tr.stage("ocr", sheets=ocr_sheets)
+    st_ocr.__enter__()
     for n in sheets:
         rpath = cache / f"sheet_{n}_regions.json"
+        ts = time.perf_counter()
         if rpath.exists():
             regions += [Region.from_dict(r) for r in json.loads(rpath.read_text(encoding="utf-8"))]
+            ocr_sheets.append(_sheet_read(n, True, ts, [r for r in regions if r.sheet == n]))
             continue
         _stage(run_id, "text_regions", "running", detail=f"sheet {n}")
         try:
@@ -185,21 +210,32 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             raise StageError("text_regions", n, f"The page may be a low-resolution scan ({exc}).") from exc
         rpath.write_text(json.dumps([r.to_dict() for r in sheet_regions]), encoding="utf-8")
         regions += sheet_regions
+        ocr_sheets.append(_sheet_read(n, False, ts, sheet_regions))
     _stage(run_id, "text_regions", "done", count=f"{len(regions)} found", ms=_ms(t0))
+    st_ocr.__exit__(None, None, None)
+    tr.stages[-1].update({"in": {"sheets": len(sheets)}, "out": {"regions": len(regions)}})
 
     # 3. match rows -------------------------------------------------------------
     t0 = time.perf_counter()
     _stage(run_id, "match", "running")
     checked_rows = [r for r in rows if r.sheet in sheets]
-    relocated = locate_rows_without_bbox(checked_rows, regions)
-    subtract_coverage(checked_rows, regions, aspect)
-    located = sum(1 for r in checked_rows if r.bbox is not None)
+    with tr.stage("match") as st:
+        relocated = locate_rows_without_bbox(checked_rows, regions, tr.placements)
+        subtract_coverage(checked_rows, regions, aspect, tr.coverage)
+        located = sum(1 for r in checked_rows if r.bbox is not None)
+        st["in"] = {"rows": len(checked_rows), "regions": len(regions)}
+        st["out"] = {"rows_located": located, "rows_relocated_by_text": relocated,
+                     "regions_covered": sum(1 for r in regions if r.covered_by)}
     _stage(run_id, "match", "done", count=f"{located} of {len(checked_rows)} rows", ms=_ms(t0))
 
     # 4. exclusions -------------------------------------------------------------
     t0 = time.perf_counter()
     _stage(run_id, "exclusions", "running")
-    n_excl = apply_exclusions(regions, template, opts.exclusions, opts.extra_regex)
+    with tr.stage("exclusions") as st:
+        n_excl = apply_exclusions(regions, template, opts.exclusions, opts.extra_regex)
+        st["in"] = {"uncovered_regions": sum(1 for r in regions if not r.covered_by)}
+        st["out"] = {"excluded": n_excl}
+        st["detail"] = {"template": template.name, "enabled": list(opts.exclusions)}
     _stage(run_id, "exclusions", "done", count=f"{n_excl} hidden", ms=_ms(t0))
 
     # 5. classify leftovers -----------------------------------------------------
@@ -207,17 +243,25 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
     _stage(run_id, "classify", "running")
     leftovers = [r for r in regions if not r.covered_by and not r.excluded_by]
     candidates = []
-    for n in sheets:
-        for group in group_line_fragments([r for r in leftovers if r.sheet == n], aspect):
-            text = _join_fragments(group)
-            verdict = classify_text(text, max(g.fcf_cells for g in group))
-            if verdict.outcome == "not_requirement":
-                continue
-            candidates.append({"group": group, "text": text, "verdict": verdict})
+    with tr.stage("rules") as st:
+        for n in sheets:
+            for group in group_line_fragments([r for r in leftovers if r.sheet == n], aspect):
+                text = _join_fragments(group)
+                verdict = classify_text(text, max(g.fcf_cells for g in group))
+                gid = tr.add_group(group, text, verdict)
+                if verdict.outcome == "not_requirement":
+                    continue
+                candidates.append({"group": group, "text": text, "verdict": verdict, "gid": gid})
+        st["in"] = {"leftover_regions": len(leftovers), "groups": len(tr.groups)}
+        st["out"] = {o: sum(1 for g in tr.groups if g["outcome"] == o)
+                     for o in ("requirement", "ambiguous", "not_requirement")}
 
     ambiguous = [c for c in candidates if c["verdict"].outcome == "ambiguous"]
     llm_stats = {"llm_calls": 0, "llm_input_tokens": 0, "llm_output_tokens": 0, "cost_usd": 0.0,
                  "llm_error": None, "ambiguous": len(ambiguous), "model_rejected": 0}
+    st_model = tr.stage("model_check")
+    st = st_model.__enter__()
+    st["in"] = {"ambiguous_groups": len(ambiguous)}
     if ambiguous and opts.use_llm:
         _stage(run_id, "classify", "running", detail=f"model on {len(ambiguous)} crops")
         crops = []
@@ -225,18 +269,46 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             g = c["group"]
             poly, box = _group_outline(g)
             crops.append(crop_with_outline(work[g[0].sheet], poly, box))
-        res = classify_crops(crops, opts.credential, opts.model, opts.provider)
+        raw_calls: list[dict] = []
+        res = classify_crops(crops, opts.credential, opts.model, opts.provider, trace_calls=raw_calls)
         llm_stats.update(llm_calls=res.calls, llm_input_tokens=res.input_tokens, llm_output_tokens=res.output_tokens,
                          cost_usd=cost_usd(opts.model, res.input_tokens, res.output_tokens), llm_error=res.error)
         for i, c in enumerate(ambiguous):
             c["llm"] = res.verdicts.get(i)
+        call_ids = tr.add_llm_calls(raw_calls, crops, [{"group_id": c["gid"], "region_ids": [x.region_id for x in c["group"]]}
+                                                       for c in ambiguous])
+        for i, c in enumerate(ambiguous):
+            call = next((tr.llm_calls[-len(raw_calls) + k] for k, rc in enumerate(raw_calls)
+                         if rc["crop_offset"] <= i < rc["crop_offset"] + rc["n_crops"]), None)
+            v = c["llm"]
+            tr.note_model(c["gid"], {
+                "status": "verdict" if v is not None else ("no_verdict" if call is not None else "not_sent"),
+                "call_id": call["call_id"] if call else None,
+                "crop_index": i - call["crop_offset"] if call else None,
+                "provider": opts.provider, "model": opts.model,
+                "verdict": v.model_dump() if v is not None else None,
+                "error": None if v is not None else ((call or {}).get("error") or res.error)})
+        st["out"] = {"calls": len(call_ids), "answered": sum(1 for c in ambiguous if c["llm"] is not None),
+                     "said_not_requirement": sum(1 for c in ambiguous if c["llm"] is not None and not c["llm"].is_requirement)}
+        st["detail"] = {"error": res.error}
     elif ambiguous:
         llm_stats["llm_error"] = "disabled"
+    if ambiguous and not opts.use_llm:
+        for c in ambiguous:
+            tr.note_model(c["gid"], {"status": "not_sent", "call_id": None, "crop_index": None, "provider": None,
+                                     "model": None, "verdict": None, "error": "disabled"})
+        st["status_override"] = "skipped"
+        st["detail"] = {"error": "disabled"}
+    elif not ambiguous:
+        st["status_override"] = "skipped"
+    st_model.__exit__(None, None, None)
     _stage(run_id, "classify", "done", count=f"{len(candidates)} candidates", ms=_ms(t0))
 
     # 6. places ----------------------------------------------------------------
     t0 = time.perf_counter()
     _stage(run_id, "places", "running")
+    st_places = tr.stage("places")
+    st = st_places.__enter__()
     row_by_cn = {r.char_no: r for r in rows}
     places_flags = []
     seen_rows: set[str] = set()
@@ -254,14 +326,25 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         sharing = [r for r in owners if decimals(r.requirement) & decimals(reg.text)]
         for row in sharing or [max(owners, key=lambda r: text_similarity(r.requirement, reg.text))]:
             if row.char_no in seen_rows:
+                tr.note_places({"region_id": reg.region_id, "char_no": row.char_no, "callout_places": n_places,
+                                "recorded": None, "shortfall": None, "note": "row already flagged by another callout"})
                 continue
             recorded = row.results_count if row.results_count is not None else row.places
             if recorded < n_places:
                 seen_rows.add(row.char_no)
                 places_flags.append({"region": reg, "row": row, "n": n_places, "recorded": recorded})
+            else:
+                tr.note_places({"region_id": reg.region_id, "char_no": row.char_no, "callout_places": n_places,
+                                "recorded": recorded, "recorded_field": "results_count" if row.results_count is not None
+                                else "places", "shortfall": False})
     _stage(run_id, "places", "done", count=f"{len(places_flags)} shortfall", ms=_ms(t0))
+    st.update({"in": {"covered_regions": sum(1 for r in regions if r.covered_by)},
+               "out": {"checks": len(tr.places_checks) + len(places_flags), "shortfalls": len(places_flags)}})
+    st_places.__exit__(None, None, None)
 
     # scoring, flags ------------------------------------------------------------
+    st_score = tr.stage("scoring")
+    st = st_score.__enter__()
     flags = []
     no_bbox = not boc.has_bbox
     for c in candidates:
@@ -272,11 +355,20 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         llm = c.get("llm")
         rule_ids = list(v.rule_ids)
         title, reason, kind = v.title, v.reason, v.kind
+        srec = {"base": v.base, "locate_factor": locate_factor,
+                "locate_reason": "BoC has no locations" if no_bbox else
+                ("nearest row was placed by text" if locate_factor < 1 else "row locations from the BoC"),
+                "nearest_char_no": near.char_no if near is not None else None,
+                "llm_factor": 1.0, "llm_reason": "a rule decided", "threshold": FLAG_THRESHOLD}
         if v.outcome == "ambiguous":
             if llm is not None:
                 if not llm.is_requirement:
                     llm_stats["model_rejected"] += 1
+                    tr.note_score(c["gid"], {**srec, "llm_factor": None, "llm_reason": "AI said not a requirement",
+                                             "product": None, "band": "none", "basis": "model judged",
+                                             "result": "dropped_by_model"}, None)
                     continue
+                srec.update(llm_factor=LLM_FACTOR[llm.certainty], llm_reason=f"AI certainty {llm.certainty}")
                 score = v.base * LLM_FACTOR[llm.certainty] * locate_factor
                 basis = "model judged"
                 reason = f"Looks like a requirement: {llm.reason.rstrip('.')}. No row covers it."
@@ -284,6 +376,7 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
                 title = {"dimension": "Dimension, no row", "gdt": "Geometric tolerance, no characteristic",
                          "note": "Note, no characteristic", "spec": "Specification reference, no row"}.get(kind, title)
             else:
+                srec.update(llm_factor=0.85, llm_reason="AI check did not run or answer")
                 score = v.base * 0.85 * locate_factor
                 basis = "model check skipped"
                 reason = v.reason + " The model check did not run, so review it."
@@ -292,10 +385,13 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             basis = {"R1": "tolerance pattern", "R2": "limit pattern", "R3": "size callout pattern",
                      "R4": "frame pattern", "R5": "note pattern", "R6": "spec pattern",
                      "R7": "finish pattern"}.get(rule_ids[0], "rule")
+        srec.update(product=score, basis=basis)
         if score < FLAG_THRESHOLD:
+            tr.note_score(c["gid"], {**srec, "band": "none", "result": "below_threshold"}, None)
             continue
         flags.append(_flag_doc("unaccounted", g[0].sheet, box, poly, g[0].angle, c["text"], None, None,
                                near, dist, rule_ids, llm, title, reason, score, basis, kind, [x.region_id for x in g]))
+        tr.note_score(c["gid"], {**srec, "band": flags[-1]["confidence"], "result": "flagged"}, flags[-1])
 
     for p in places_flags:
         reg, row = p["region"], p["row"]
@@ -309,8 +405,18 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
             f"The callout says {p['n']} places; row CN {row.char_no} records {p['recorded']}.",
             score, "nX parsed", row.char_type, [reg.region_id],
         ))
+        tr.note_places({"region_id": reg.region_id, "char_no": row.char_no, "callout_places": p["n"],
+                        "recorded": p["recorded"], "recorded_field": "results_count" if row.results_count is not None
+                        else "places", "shortfall": True,
+                        "score": {"base": 0.9, "locate_factor": near_factor,
+                                  "locate_reason": "row placed by text" if near_factor < 1 else "row location from the BoC",
+                                  "llm_factor": 1.0, "llm_reason": "a rule decided", "threshold": FLAG_THRESHOLD,
+                                  "product": score, "basis": "nX parsed", "band": flags[-1]["confidence"],
+                                  "result": "flagged"}}, flags[-1])
 
+    pre_merge = list(flags)
     flags = _merge_overlapping(flags)
+    tr.note_merge(pre_merge, flags)
     flags.sort(key=lambda f: (f["sheet"], round(f["bbox"]["y"] * 12), f["bbox"]["x"]))
     counters = {"unaccounted": 0, "places": 0}
     for f in flags:
@@ -318,22 +424,35 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         f["flag_id"] = f"{'U' if f['class'] == 'unaccounted' else 'P'}-{counters[f['class']]}"
         f["crop_url"] = f"/runs/{run_id}/flags/{f['flag_id']}/crop.png"
         f["run_id"] = run_id
+    st.update({"in": {"candidates": len(candidates), "places_shortfalls": len(places_flags)},
+               "out": {"flags": len(flags), "merged_away": len(pre_merge) - len(flags)}})
+    st_score.__exit__(None, None, None)
 
     # display text: the model transcribes each flagged crop when it is available; otherwise tidied OCR
     for f in flags:
         f["drawing_text"] = tidy_ocr_text(f["drawing_text"])
+    st_tr = tr.stage("transcription")
+    st = st_tr.__enter__()
     if flags and opts.use_llm:
         crops = [crop_with_outline(work[f["sheet"]], [tuple(p) for p in f["poly"]], Box.from_dict(f["bbox"]))
                  for f in flags]
-        tr = transcribe_crops(crops, opts.credential, opts.model, opts.provider)
+        raw_calls = []
+        tres = transcribe_crops(crops, opts.credential, opts.model, opts.provider, trace_calls=raw_calls)
         for i, f in enumerate(flags):
-            if tr.texts.get(i):
-                f["transcription"] = tr.texts[i]
-        llm_stats["llm_calls"] += tr.calls
-        llm_stats["llm_input_tokens"] += tr.input_tokens
-        llm_stats["llm_output_tokens"] += tr.output_tokens
+            if tres.texts.get(i):
+                f["transcription"] = tres.texts[i]
+        llm_stats["llm_calls"] += tres.calls
+        llm_stats["llm_input_tokens"] += tres.input_tokens
+        llm_stats["llm_output_tokens"] += tres.output_tokens
         llm_stats["cost_usd"] = cost_usd(opts.model, llm_stats["llm_input_tokens"], llm_stats["llm_output_tokens"])
-        llm_stats["transcription_error"] = tr.error
+        llm_stats["transcription_error"] = tres.error
+        tr.add_llm_calls(raw_calls, crops, [{"flag_id": f["flag_id"], "region_ids": f["region_ids"], "_flag": f}
+                                            for f in flags])
+        st.update({"in": {"flags": len(flags)}, "out": {"transcribed": len(tres.texts)}, "detail": {"error": tres.error}})
+    else:
+        st.update({"in": {"flags": len(flags)}, "status_override": "skipped",
+                   "detail": {"error": "disabled" if not opts.use_llm else None}})
+    st_tr.__exit__(None, None, None)
 
     checked = [r for r in regions if not r.excluded_by]
     covered_regions = [r for r in regions if r.covered_by]
@@ -372,14 +491,37 @@ def _execute(run_id, drawing, drawing_name, boc_bytes, boc_name, opts: RunOption
         }
     (rdir / "coverage.json").write_text(json.dumps(overlay), encoding="utf-8")
 
+    trace_ref = {"available": False}
+    try:
+        trace = tr.finalize(regions, rows, checked_rows, flags, template, opts, aspect, llm_stats)
+        store.put_trace(run_id, trace)
+        trace_ref = {"available": True, "partial": False, "url": f"/runs/{run_id}/trace",
+                     "funnel": {s["key"]: s["count"] for s in trace["funnel"]}}
+    except Exception as exc:  # noqa: BLE001  the trace never changes a run's outcome
+        traceback.print_exc()
+        trace_ref = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+
     def finish(doc):
         doc["status"] = "complete"
         doc["flags"] = flags
         doc["stats"] = stats
         doc["warnings"] = warnings
         doc["rows"] = [r.to_dict() for r in rows]
+        doc["trace"] = trace_ref
 
     store.update_run(run_id, finish)
+
+
+def _sheet_read(n: int, cache_hit: bool, t0: float, regs: list[Region]) -> dict:
+    """Per-sheet text reading record for the trace (counts by where each region came from)."""
+    origins: dict[str, int] = {}
+    for r in regs:
+        tag = r.region_id.split("-", 1)[1][:1]
+        key = {"o": "ocr", "r": "ocr_rotated", "t": "text_layer", "g": "fcf_grid"}.get(tag, "ocr")
+        origins[key] = origins.get(key, 0) + 1
+    return {"sheet": n, "cache_hit": cache_hit, "ms": _ms(t0), "regions": len(regs), "by_origin": origins,
+            "with_text_layer": sum(1 for r in regs if "text_layer" in r.sources),
+            "with_frame": sum(1 for r in regs if r.fcf_cells)}
 
 
 def _join_fragments(group: list[Region]) -> str:

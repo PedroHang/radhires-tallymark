@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -152,10 +153,48 @@ def _google_client(cred: str):
     return genai.Client(api_key=cred)
 
 
+def _raw_text(provider: str, resp) -> str | None:
+    """The response text exactly as the provider returned it (for the decision trace)."""
+    try:
+        if provider == "anthropic":
+            return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        if provider == "openai":
+            return getattr(resp, "output_text", None)
+        if provider == "google":
+            return getattr(resp, "text", None)
+    except Exception:  # noqa: BLE001  tracing never affects the call
+        return None
+    return None
+
+
+def _note_response(meta: dict | None, provider: str, resp, t0: float) -> None:
+    if meta is None:
+        return
+    meta["latency_ms"] = int((time.perf_counter() - t0) * 1000)
+    meta["raw_text"] = _raw_text(provider, resp)
+    rid = getattr(resp, "id", None) or getattr(resp, "response_id", None)
+    meta["response_id"] = rid if isinstance(rid, str) else None
+    stop = getattr(resp, "stop_reason", None) if provider == "anthropic" else None
+    meta["stop_reason"] = stop if isinstance(stop, str) else None
+
+
+def _note_error(meta: dict | None, code: str, t0: float, detail: str | None = None) -> None:
+    if meta is None:
+        return
+    meta.setdefault("latency_ms", int((time.perf_counter() - t0) * 1000))
+    meta["error"] = code
+    if detail:
+        meta["error_detail"] = detail[:500]
+
+
 def structured_call(provider: str, cred: str, model: str, system: str, images: list[Image.Image],
-                    instruction: str, schema: type[BaseModel], max_tokens: int):
+                    instruction: str, schema: type[BaseModel], max_tokens: int, meta: dict | None = None):
     """One request: numbered crops + an instruction in, a parsed `schema` instance out.
-    Returns (parsed_or_None, input_tokens, output_tokens). Raises LlmError on failure."""
+    Returns (parsed_or_None, input_tokens, output_tokens). Raises LlmError on failure.
+    When `meta` is a dict it is filled with what the decision trace records: raw_text (the
+    response text exactly as returned), latency_ms, response_id, stop_reason, and error on failure.
+    Passing it never changes the request or the return value."""
+    t0 = time.perf_counter()
     try:
         if provider == "anthropic":
             content: list[dict] = []
@@ -167,6 +206,7 @@ def structured_call(provider: str, cred: str, model: str, system: str, images: l
             resp = _anthropic_client(cred).messages.parse(
                 model=model, max_tokens=max_tokens, system=system, output_config={"effort": "low"},
                 messages=[{"role": "user", "content": content}], output_format=schema)
+            _note_response(meta, provider, resp, t0)
             parsed = None if resp.stop_reason == "refusal" else resp.parsed_output
             return parsed, resp.usage.input_tokens, resp.usage.output_tokens
 
@@ -179,6 +219,7 @@ def structured_call(provider: str, cred: str, model: str, system: str, images: l
             resp = _openai_client(cred).responses.parse(
                 model=model, instructions=system, input=[{"role": "user", "content": content}],
                 text_format=schema, reasoning={"effort": "low"}, max_output_tokens=max_tokens)
+            _note_response(meta, provider, resp, t0)
             usage = resp.usage
             return resp.output_parsed, (usage.input_tokens if usage else 0), (usage.output_tokens if usage else 0)
 
@@ -195,6 +236,7 @@ def structured_call(provider: str, cred: str, model: str, system: str, images: l
                 model=model, contents=parts,
                 config=types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json",
                                                    response_schema=schema, max_output_tokens=max_tokens))
+            _note_response(meta, provider, resp, t0)
             um = resp.usage_metadata
             tin = (um.prompt_token_count or 0) if um else 0
             tout = ((um.candidates_token_count or 0) + (um.thoughts_token_count or 0)) if um else 0
@@ -202,10 +244,14 @@ def structured_call(provider: str, cred: str, model: str, system: str, images: l
             if parsed is None and resp.text:
                 parsed = schema.model_validate_json(resp.text)
             return parsed, tin, tout
-    except LlmError:
+    except LlmError as e:
+        _note_error(meta, e.code, t0)
         raise
     except Exception as exc:  # noqa: BLE001  any SDK / network / parse failure becomes a code
-        raise LlmError(_error_code(provider, exc)) from exc
+        code = _error_code(provider, exc)
+        _note_error(meta, code, t0, f"{type(exc).__name__}: {exc}")
+        raise LlmError(code) from exc
+    _note_error(meta, f"unknown_provider_{provider}", t0)
     raise LlmError(f"unknown_provider_{provider}")
 
 
@@ -260,7 +306,8 @@ def _b64png(im: Image.Image) -> str:
 
 
 def classify_crops(crops: list[Image.Image], credential: str | None, model: str = DEFAULT_MODEL,
-                   provider: str = DEFAULT_PROVIDER) -> LlmResult:
+                   provider: str = DEFAULT_PROVIDER, trace_calls: list | None = None) -> LlmResult:
+    """trace_calls: when a list, one record per request sent is appended (see _call_record)."""
     cred, _ = resolve_credential(provider, credential)
     if not cred:
         return LlmResult({}, 0, 0, 0, error="no_credential")
@@ -268,12 +315,19 @@ def classify_crops(crops: list[Image.Image], credential: str | None, model: str 
     calls = tin = tout = 0
     for start in range(0, len(crops), MAX_CROPS_PER_REQUEST):
         batch = crops[start:start + MAX_CROPS_PER_REQUEST]
+        instruction = f"Return exactly one verdict for each of the {len(batch)} crops."
+        meta = {} if trace_calls is not None else None
         try:
             parsed, i_tok, o_tok = structured_call(
-                provider, cred, model, SYSTEM, batch,
-                f"Return exactly one verdict for each of the {len(batch)} crops.", CropVerdicts, 16000)
+                provider, cred, model, SYSTEM, batch, instruction, CropVerdicts, 16000, meta=meta)
         except LlmError as e:
+            if trace_calls is not None:
+                trace_calls.append(_call_record("classify", provider, model, SYSTEM, instruction, CropVerdicts,
+                                                16000, start, len(batch), meta, None, 0, 0))
             return LlmResult(verdicts, calls, tin, tout, error=e.code)
+        if trace_calls is not None:
+            trace_calls.append(_call_record("classify", provider, model, SYSTEM, instruction, CropVerdicts,
+                                            16000, start, len(batch), meta, parsed, i_tok, o_tok))
         calls += 1
         tin += i_tok
         tout += o_tok
@@ -313,7 +367,7 @@ class TranscribeResult:
 
 
 def transcribe_crops(crops: list[Image.Image], credential: str | None, model: str = DEFAULT_MODEL,
-                     provider: str = DEFAULT_PROVIDER) -> TranscribeResult:
+                     provider: str = DEFAULT_PROVIDER, trace_calls: list | None = None) -> TranscribeResult:
     """Display-only transcription of flagged crops. Flag decisions never depend on it."""
     cred, _ = resolve_credential(provider, credential)
     if not cred:
@@ -322,12 +376,19 @@ def transcribe_crops(crops: list[Image.Image], credential: str | None, model: st
     calls = tin = tout = 0
     for start in range(0, len(crops), MAX_CROPS_PER_REQUEST):
         batch = crops[start:start + MAX_CROPS_PER_REQUEST]
+        instruction = f"Return one transcription for each of the {len(batch)} crops."
+        meta = {} if trace_calls is not None else None
         try:
             parsed, i_tok, o_tok = structured_call(
-                provider, cred, model, TRANSCRIBE_SYSTEM, batch,
-                f"Return one transcription for each of the {len(batch)} crops.", CropTexts, 4000)
+                provider, cred, model, TRANSCRIBE_SYSTEM, batch, instruction, CropTexts, 4000, meta=meta)
         except LlmError as e:
+            if trace_calls is not None:
+                trace_calls.append(_call_record("transcribe", provider, model, TRANSCRIBE_SYSTEM, instruction,
+                                                CropTexts, 4000, start, len(batch), meta, None, 0, 0))
             return TranscribeResult(texts, calls, tin, tout, error=e.code)
+        if trace_calls is not None:
+            trace_calls.append(_call_record("transcribe", provider, model, TRANSCRIBE_SYSTEM, instruction,
+                                            CropTexts, 4000, start, len(batch), meta, parsed, i_tok, o_tok))
         calls += 1
         tin += i_tok
         tout += o_tok
@@ -337,6 +398,34 @@ def transcribe_crops(crops: list[Image.Image], credential: str | None, model: st
             if 0 <= item.crop_index < len(batch) and item.text.strip():
                 texts[start + item.crop_index] = item.text.strip()
     return TranscribeResult(texts, calls, tin, tout)
+
+
+def _call_record(job: str, provider: str, model: str, system: str, instruction: str, schema: type[BaseModel],
+                 max_tokens: int, offset: int, n: int, meta: dict | None, parsed, tin: int, tout: int) -> dict:
+    """What one request sent and got back, for the decision trace. Never contains the credential.
+    `crop_offset` is the index of this request's first crop in the list the caller passed."""
+    meta = meta or {}
+    user_content: list[dict] = []
+    for i in range(n):
+        user_content += [{"type": "text", "text": f"Crop {i}:"}, {"type": "image", "crop_index": i}]
+    user_content.append({"type": "text", "text": instruction})
+    try:
+        parsed_json = parsed.model_dump() if parsed is not None else None
+    except Exception:  # noqa: BLE001
+        parsed_json = None
+    return {
+        "job": job, "provider": provider, "model": model,
+        "system_prompt": system, "instruction": instruction, "user_content": user_content,
+        "request": {"max_tokens": max_tokens,
+                    "reasoning_effort": "low" if provider in ("anthropic", "openai") else None,
+                    "response_schema_name": schema.__name__, "response_schema": schema.model_json_schema()},
+        "crop_offset": offset, "n_crops": n,
+        "raw_response_text": meta.get("raw_text"), "parsed": parsed_json,
+        "input_tokens": tin, "output_tokens": tout, "latency_ms": meta.get("latency_ms"),
+        "cost_usd": cost_usd(model, tin, tout) if (tin or tout) else None,
+        "response_id": meta.get("response_id"), "stop_reason": meta.get("stop_reason"),
+        "error": meta.get("error"), "error_detail": meta.get("error_detail"),
+    }
 
 
 # $ per million tokens (input, output). Only prices checked against a first-party source are listed;

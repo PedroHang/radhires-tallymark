@@ -1,4 +1,4 @@
-"""Tallymark API (BRD section 7.5) + static frontend."""
+"""Tallymark API + static frontend."""
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +25,8 @@ from .pipeline.llm import (DEFAULT_PROVIDER, PROVIDERS, crop_with_outline, detec
                            resolve_credential)
 from .pipeline.regions import open_drawing
 from .pipeline.run import RunOptions, execute, new_run_doc
+from .pipeline.trace import CATALOG as TRACE_CATALOG
+from .pipeline.trace import summary as trace_summary
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -367,7 +369,7 @@ def flag_crop(run_id: str, flag_id: str):
 
 
 EXPORT_COLUMNS = ["flag_id", "class", "sheet", "zone", "bbox_x", "bbox_y", "bbox_w", "bbox_h", "drawing_text",
-                  "char_no", "nearest_char_no", "reason", "confidence", "disposition", "note"]
+                  "char_no", "nearest_char_no", "reason", "confidence", "disposition", "note", "audit_ref"]
 
 
 @app.get("/runs/{run_id}/exceptions.csv")
@@ -382,12 +384,95 @@ def exceptions_csv(run_id: str, include_dismissed: bool = False):
         b = f["bbox"]
         w.writerow([f["flag_id"], f["class"], f["sheet"], f["zone"], b["x"], b["y"], b["w"], b["h"],
                     f.get("transcription") or f["drawing_text"], f["char_no"] or "", f["nearest_char_no"] or "",
-                    f["reason"], f["confidence"], f["disposition"], f["disposition_note"] or ""])
+                    f["reason"], f["confidence"], f["disposition"], f["disposition_note"] or "",
+                    f"/runs/{run_id}/trace/flags/{f['flag_id']}" if (doc.get("trace") or {}).get("available") else ""])
     stem = Path(doc["drawing"]["filename"]).stem
     short = "ftc06" if "ftc_06" in stem else stem
     name = f"{short}_exceptions_{doc['created_at'][:10]}.csv"
     return Response(buf.getvalue(), media_type="text/csv",
                      headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# --------------------------------------------------------------------------- decision trace (read-only)
+# Schema: docs/TRACE.md. The trace is written when a run finishes (partial on a failed run).
+def _trace_or_404(run_id: str) -> dict:
+    doc = _run_or_404(run_id)
+    trace = store.get_trace(run_id)
+    if trace is None:
+        if doc["status"] in ("queued", "running"):
+            raise HTTPException(409, "The trace is written when the run finishes.")
+        raise HTTPException(404, "No trace for this run (it ran before tracing was added, or it expired).")
+    return trace
+
+
+@app.get("/runs/{run_id}/trace")
+def get_trace(run_id: str):
+    return trace_summary(_trace_or_404(run_id))
+
+
+@app.get("/runs/{run_id}/trace/catalog")
+def get_trace_catalog(run_id: str):
+    trace = _trace_or_404(run_id)
+    return {**TRACE_CATALOG, "trace_catalog_version": trace.get("catalog_version")}
+
+
+@app.get("/runs/{run_id}/trace/regions")
+def get_trace_regions(run_id: str, sheet: int | None = None, outcome: str | None = None, q: str | None = None,
+                      offset: int = 0, limit: int = 200):
+    regions = _trace_or_404(run_id)["regions"]
+    if sheet is not None:
+        regions = [r for r in regions if r["sheet"] == sheet]
+    if outcome:
+        wanted = set(outcome.split(","))
+        regions = [r for r in regions if r["final"]["outcome"] in wanted]
+    if q:
+        regions = [r for r in regions if q.lower() in (r["text"] or "").lower()]
+    limit = max(1, min(limit, 1000))
+    return {"total": len(regions), "offset": offset, "limit": limit, "items": regions[offset:offset + limit]}
+
+
+@app.get("/runs/{run_id}/trace/regions/{region_id}")
+def get_trace_region(run_id: str, region_id: str):
+    reg = next((r for r in _trace_or_404(run_id)["regions"] if r["region_id"] == region_id), None)
+    if reg is None:
+        raise HTTPException(404, "Region not found.")
+    return reg
+
+
+@app.get("/runs/{run_id}/trace/flags/{flag_id}")
+def get_trace_flag(run_id: str, flag_id: str):
+    rec = _trace_or_404(run_id)["flags"].get(flag_id)
+    if rec is None:
+        raise HTTPException(404, "Flag not found.")
+    return rec
+
+
+@app.get("/runs/{run_id}/trace/llm/{call_id}")
+def get_trace_llm_call(run_id: str, call_id: str):
+    call = next((c for c in _trace_or_404(run_id)["llm_calls"] if c["call_id"] == call_id), None)
+    if call is None:
+        raise HTTPException(404, "Model call not found.")
+    return call
+
+
+@app.get("/runs/{run_id}/trace/llm/{call_id}/crops/{i}.png")
+def get_trace_llm_crop(run_id: str, call_id: str, i: int):
+    _run_or_404(run_id)
+    data = store.get_trace_artifact(run_id, f"llm/{Path(call_id).name}/{int(i)}.png")
+    if data is None:
+        raise HTTPException(404, "Crop not found.")
+    return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.get("/runs/{run_id}/audit.json")
+def get_audit_json(run_id: str):
+    trace = _trace_or_404(run_id)
+    doc = _run_or_404(run_id)
+    body = {**trace, "catalog": TRACE_CATALOG,
+            "flags_as_reported": doc["flags"], "stats": doc.get("stats"), "warnings": doc.get("warnings")}
+    name = f"{Path(doc['drawing']['filename']).stem}_audit_{run_id}.json"
+    return Response(json.dumps(body, ensure_ascii=False, indent=1), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.delete("/runs/{run_id}")
