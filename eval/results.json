@@ -1,0 +1,979 @@
+{
+  "tier_a_hand_verified": {
+    "results": [
+      {
+        "drawing": "nist_ftc_06_asme1_rd.pdf",
+        "rows": 48,
+        "sheets": 3,
+        "clean_false_flags": 0,
+        "clean_false_flags_rules_only": 0,
+        "clean_false_flag_texts": [],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X ⌴ Ø.812 ±.020",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 2,
+                "requirement": "⊥ .012 A",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 3,
+                "requirement": "Ø.250 ±.008",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": "⊥ .012 A B",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 2,
+              "flags": 5,
+              "true_flags": 2
+            },
+            "rows": 45,
+            "warm_seconds": 0.42
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X Ø.562 ±.008",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 3,
+                "requirement": "↧ .50 ±.05",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 3,
+                "requirement": "⌖ .025 D C K",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 3,
+                "requirement": "⌖ .025 D C J",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 6,
+              "true_flags": 3
+            },
+            "rows": 45,
+            "warm_seconds": 0.44
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "drawings": 1,
+      "sheets": 3,
+      "seeded_items": 8,
+      "recall": 1.0,
+      "precision": 1.0,
+      "false_flags_per_clean_sheet": 0.0,
+      "false_flags_per_clean_sheet_rules_only": 0.0,
+      "review_load": 0.08888888888888889,
+      "recall_no_bbox": 0.625,
+      "precision_no_bbox": 0.45454545454545453,
+      "seeded_by_op": {
+        "reduce_places": 2,
+        "drop_later_sheet_row": 2,
+        "drop_row": 4
+      }
+    }
+  },
+  "tier_b_reader_proposed": {
+    "results": [
+      {
+        "drawing": "nist_ctc_01_asme1_rd.pdf",
+        "rows": 6,
+        "sheets": 1,
+        "clean_false_flags": 8,
+        "clean_false_flags_rules_only": 0,
+        "clean_false_flag_texts": [
+          "R8: 35.2",
+          "R8: 10.75 A BIC",
+          "R8: 020 +0.05",
+          "R8: 十035° -0.2",
+          "R8: -0.10",
+          "R8: S0'0-",
+          "R8: 60°±0.5",
+          "R8: 035 +0.2"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "034.8 - 35.2",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "$0.75 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "1.25 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "H00.5 A",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 12,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "rows": 2,
+            "warm_seconds": 0.23
+          },
+          {
+            "seeded": [
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "$0.75 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "034.8 - 35.2",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "11.5 A",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "25±0.15",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 12,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "rows": 2,
+            "warm_seconds": 0.22
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ctc_02_asme1_rc.pdf",
+        "rows": 13,
+        "sheets": 3,
+        "clean_false_flags": 3,
+        "clean_false_flags_rules_only": 1,
+        "clean_false_flag_texts": [
+          "R1: 040±0.15",
+          "R8: 10.5DE@X",
+          "R8: 0.05"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X 8100 ±0.15 d1.5@ABC",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 2,
+                "requirement": "040±0.15 00.25 K",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "2. ASMEY14.41-2003APPLIESTO",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": "2.500.5 A B C",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 6,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 8,
+              "true_flags": 4
+            },
+            "rows": 10,
+            "warm_seconds": 0.47
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X 8100 ±0.15 d1.5@ABC",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 3,
+                "requirement": "Ø.5 D E F",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": "040±0.15 00.25 K",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "2. ASMEY14.41-2003APPLIESTO",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 6,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 8,
+              "true_flags": 4
+            },
+            "rows": 10,
+            "warm_seconds": 0.48
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ctc_03_asme1_rc.pdf",
+        "rows": 9,
+        "sheets": 1,
+        "clean_false_flags": 0,
+        "clean_false_flags_rules_only": 0,
+        "clean_false_flag_texts": [],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "4X.82 ±.06",
+                "expect": "places"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "L0.01 A .438±.005",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "SWITCHMOUNTING ①.05@DB C LOCATIONS 4XQ.625 ±.005 .03 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "O.05@AB@C@ 2X.438 ±.005",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 5,
+              "true_flags": 4
+            },
+            "rows": 6,
+            "warm_seconds": 0.23
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "SWITCHMOUNTING ①.05@DB C LOCATIONS 4XQ.625 ±.005 .03 A B C",
+                "expect": "places"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "03DBC 01.500±.005 ①.08 D B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "L0.01 A .438±.005",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "L0.01 E 01.065 ±.003",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 5,
+              "true_flags": 3
+            },
+            "rows": 6,
+            "warm_seconds": 0.21
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ctc_04_asme1_rd.pdf",
+        "rows": 6,
+        "sheets": 1,
+        "clean_false_flags": 1,
+        "clean_false_flags_rules_only": 1,
+        "clean_false_flag_texts": [
+          "R4: 01.5 D E F"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "-30X 014 ±0.1",
+                "expect": "places"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "Ø.5 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "00.35 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "6X06.65±0.12 01.5 D E F [00.3 D E",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 5,
+              "true_flags": 4
+            },
+            "rows": 3,
+            "warm_seconds": 0.23
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "30X √020 ±0.3 X 90°±1",
+                "expect": "places"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "6X06.65±0.12 01.5 D E F [00.3 D E",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "Ø.5 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "-30X 014 ±0.1",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 4,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 5,
+              "true_flags": 4
+            },
+            "rows": 3,
+            "warm_seconds": 0.22
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ftc_07_asme1_rd.pdf",
+        "rows": 9,
+        "sheets": 4,
+        "clean_false_flags": 16,
+        "clean_false_flags_rules_only": 0,
+        "clean_false_flag_texts": [
+          "R8: .003",
+          "R8: +.003",
+          "R8: -F1.2",
+          "R8: -.000",
+          "R8: .015",
+          "R8: F1.1",
+          "R8: .000",
+          "R8: .01 01.00 .06 A BC 03 A",
+          "R8: 2XQ.594+.012",
+          "R8: 中0.040@0.045 M A X ABC",
+          "R8: .002",
+          "R8: 4X 8.173+.005 ①.015 A .060 A B C -.001",
+          "R8: 0.040@0.045MAXABC",
+          "R8: SIM REQT .070 A B C 015 A",
+          "R8: 2X 8.594 +.012",
+          "R8: .002"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 2,
+                "requirement": ".02@EBC .06MEBC 4X &.281 +.006 Q.438 ±.010 √.30±.02 -.001",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 4,
+                "requirement": "-R.012-.022 INNERANDOUTERRADII R.012-.022 OFENTIREGROOVE INNERANDOUTERWALL OF ENTIRE GROOVE 030ABC 005ABC .006 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": ".06 A B C APPLIES TO ALL",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "2X Ø.250 +.003 √.30±.02 .023.425 A B C",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 20,
+              "true_flags": 3
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 7,
+              "true_flags": 3
+            },
+            "rows": 6,
+            "warm_seconds": 0.62
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X Ø.250 +.003 √.30±.02 .023.425 A B C",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 4,
+                "requirement": "-R.012-.022 INNERANDOUTERRADII R.012-.022 OFENTIREGROOVE INNERANDOUTERWALL OF ENTIRE GROOVE 030ABC 005ABC .006 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": ".06 A B C APPLIES TO ALL",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": ".02@EBC .06MEBC 4X &.281 +.006 Q.438 ±.010 √.30±.02 -.001",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 20,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 7,
+              "true_flags": 4
+            },
+            "rows": 6,
+            "warm_seconds": 0.6
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ftc_08_asme1_rc.pdf",
+        "rows": 10,
+        "sheets": 4,
+        "clean_false_flags": 18,
+        "clean_false_flags_rules_only": 1,
+        "clean_false_flag_texts": [
+          "R8: -.001",
+          "R8: 03? 015",
+          "R8: 0.020 M A B .238+.005",
+          "R8: 001",
+          "R4: 10.015 M A",
+          "R8: -.001",
+          "R8: .05 A B C .03①A .015①A",
+          "R8: .03 A 06 ABC",
+          "R8: .015 L1<→L2",
+          "R8: .015DG@0",
+          "R8: -.001",
+          "R8: .015 DH@-J@O .015DHM-JM",
+          "R8: 0.020 M D B C 0.050 D B C SIMREQT1 0.228 t005",
+          "R8: .001",
+          "R8: -.001 005",
+          "R8: SIMREQT2 0.020MDBC 0.242_+005 Q.050MDBC DB",
+          "R8: .001",
+          "R8: 0.020"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "2X Q.238 +.005 2XQ:238+ Ø.023MABC",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 2,
+                "requirement": "10X Ø.213+.005 ①.04@DBC Q.02@DB",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 4,
+                "requirement": "SIMREQT2 Ø.020 Ø.228.001 Ø.050 M",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 3,
+                "requirement": ".040 D .005 D B .005 D B C",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 21,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 7,
+              "true_flags": 4
+            },
+            "rows": 7,
+            "warm_seconds": 0.59
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 2,
+                "requirement": "10X Ø.213+.005 ①.04@DBC Q.02@DB",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 3,
+                "requirement": "①.03 D B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "02D .06 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "2X Q.238 +.005 2XQ:238+ Ø.023MABC",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 22,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 6,
+              "true_flags": 3
+            },
+            "rows": 7,
+            "warm_seconds": 0.59
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ftc_09_asme1_rd.pdf",
+        "rows": 22,
+        "sheets": 4,
+        "clean_false_flags": 9,
+        "clean_false_flags_rules_only": 2,
+        "clean_false_flag_texts": [
+          "P1: 4X.03±.01X.03±.01",
+          "R8: .000",
+          "R8: 2XR",
+          "R8: 4XR",
+          "R8: D.02AF@",
+          "R8: 中01AGH",
+          "R1: 140 ±.008 1.010 A G B",
+          "R8: 0.010",
+          "R8: [0.010"
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 4,
+                "requirement": "SEPREQT Ø.025 M ADM EM 2X Ø.156 ±.008",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 3,
+                "requirement": ".008 A G H",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 4,
+                "requirement": "3X.020 A B C 3X0.281±.008 [0.010 Ø.030[0.76]A B C Ø.315±.008 [8 ±0.2",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "3X 8.250 ±.003 Ø.050.260 A B C 18.010@2 Ø.010.260 A -.000",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 13,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 10,
+              "true_flags": 4
+            },
+            "rows": 19,
+            "warm_seconds": 0.62
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 1,
+                "requirement": "3X 8.250 ±.003 Ø.050.260 A B C 18.010@2 Ø.010.260 A -.000",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 2,
+                "requirement": "4X.250±.008 $O.030 A B C",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 3,
+                "requirement": ".375 ±.008 Φの.040 A B C Ø.010lA",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "SSTSHT,ASTMA240.",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 13,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 3,
+              "flags": 10,
+              "true_flags": 3
+            },
+            "rows": 19,
+            "warm_seconds": 0.6
+          }
+        ]
+      },
+      {
+        "drawing": "nist_ftc_10_asme1_rb.pdf",
+        "rows": 30,
+        "sheets": 5,
+        "clean_false_flags": 9,
+        "clean_false_flags_rules_only": 6,
+        "clean_false_flag_texts": [
+          "R1: 86±0.15",
+          "R8: 1.75 A B C 0.2 15",
+          "R3: Φ00.8 D EM-FM-GM",
+          "R8: F65-",
+          "R1: 4X L010 ±0.25",
+          "R8: F81",
+          "R4: 00.12 03.5 G6 00.8 D B",
+          "R4: 00.8 D",
+          "R4: "
+        ],
+        "variants": [
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 4,
+                "requirement": "2X M3x0.5-6g",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 3,
+                "requirement": "Q Ø.1 DOOHKL 3X 03.5 ±0.2",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": "-15 ±0.2 $1ABC 10.1 A",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 5,
+                "requirement": "4X07±0.25",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 13,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 15,
+              "true_flags": 4
+            },
+            "rows": 27,
+            "warm_seconds": 0.76
+          },
+          {
+            "seeded": [
+              {
+                "op": "reduce_places",
+                "sheet": 3,
+                "requirement": "Q Ø.1 DOOHKL 3X 03.5 ±0.2",
+                "expect": "places"
+              },
+              {
+                "op": "drop_later_sheet_row",
+                "sheet": 5,
+                "requirement": "4X07±0.25",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 2,
+                "requirement": "=0.5AIJ 5±0.2",
+                "expect": "unaccounted"
+              },
+              {
+                "op": "drop_row",
+                "sheet": 1,
+                "requirement": "86±0.15 Q0.25 A",
+                "expect": "unaccounted"
+              }
+            ],
+            "with_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 13,
+              "true_flags": 4
+            },
+            "no_bbox": {
+              "seeded": 4,
+              "hits": 4,
+              "flags": 15,
+              "true_flags": 4
+            },
+            "rows": 27,
+            "warm_seconds": 0.73
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "drawings": 8,
+      "sheets": 23,
+      "seeded_items": 64,
+      "recall": 0.984375,
+      "precision": 0.33689839572192515,
+      "false_flags_per_clean_sheet": 2.782608695652174,
+      "false_flags_per_clean_sheet_rules_only": 0.4782608695652174,
+      "review_load": 1.16875,
+      "recall_no_bbox": 0.9375,
+      "precision_no_bbox": 0.49586776859504134,
+      "seeded_by_op": {
+        "drop_row": 40,
+        "reduce_places": 14,
+        "drop_later_sheet_row": 10
+      }
+    }
+  },
+  "cold_read_seconds_per_sheet": {
+    "nist_ftc_06_asme1_rd.pdf": null,
+    "nist_ctc_01_asme1_rd.pdf": 8.7,
+    "nist_ctc_02_asme1_rc.pdf": 8.8,
+    "nist_ctc_03_asme1_rc.pdf": 8.2,
+    "nist_ctc_04_asme1_rd.pdf": 7.6,
+    "nist_ctc_05_asme1_rd.pdf": 6.1,
+    "nist_ftc_07_asme1_rd.pdf": 7.6,
+    "nist_ftc_08_asme1_rc.pdf": 7.4,
+    "nist_ftc_09_asme1_rd.pdf": 7.3,
+    "nist_ftc_10_asme1_rb.pdf": 5.9,
+    "nist_ftc_11_asme1_rb.pdf": 5.8
+  },
+  "settings": {
+    "variants": 2,
+    "seeds_per_variant": 4,
+    "model_check": "off"
+  }
+}

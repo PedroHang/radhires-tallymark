@@ -1,0 +1,62 @@
+{
+  "drawing": "nist_ftc_06_asme1_rd.pdf",
+  "ground_truth_rows": 48,
+  "simulated_rows": 45,
+  "seeded": [
+    {
+      "op": "drop_notes",
+      "requirement": "⌓ .05 A B C APPLIES TO ALL UNTOLERANCED SURFACES (NOTE 4)",
+      "sheet": 1,
+      "expect": "unaccounted",
+      "bbox": {
+        "x": 0.0711,
+        "y": 0.3991,
+        "w": 0.189,
+        "h": 0.0378
+      },
+      "gt_char_no": "1"
+    },
+    {
+      "op": "reduce_places",
+      "requirement": "4X Ø.281 ±.008",
+      "sheet": 1,
+      "places": 1,
+      "expect": "places",
+      "true_places": 4,
+      "bbox": {
+        "x": 0.4808,
+        "y": 0.7572,
+        "w": 0.0832,
+        "h": 0.0736
+      },
+      "gt_char_no": "20",
+      "char_no": "19"
+    },
+    {
+      "op": "drop_later_sheet_row",
+      "requirement": "12.00 ±.01",
+      "sheet": 2,
+      "expect": "unaccounted",
+      "bbox": {
+        "x": 0.6265,
+        "y": 0.64,
+        "w": 0.059,
+        "h": 0.0553
+      },
+      "gt_char_no": "33"
+    },
+    {
+      "op": "drop_row",
+      "requirement": "⌖ .025 D C K",
+      "sheet": 3,
+      "expect": "unaccounted",
+      "bbox": {
+        "x": 0.6628,
+        "y": 0.2227,
+        "w": 0.1129,
+        "h": 0.0195
+      },
+      "gt_char_no": "38"
+    }
+  ]
+}

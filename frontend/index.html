@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tallymark</title>
+<script>
+  /* Theme before first paint: a stored choice wins, otherwise follow the system. */
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("tallymark-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+<link rel="stylesheet" href="app.css?v=5">
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=5">
+</head>
+<body>
+<!-- Icon sprite: 24px grid, stroked with currentColor so every icon follows the theme. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 15.5h17M14 15.5v4"/><circle cx="9.5" cy="10" r="2.6"/><path d="M12.5 7.5 16.5 10"/></symbol>
+    <symbol id="i-table" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M3.5 14.5h17M9 9.5v10"/></symbol>
+    <symbol id="i-sample" viewBox="0 0 24 24"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19"/><path d="M12 11.2l.95 1.95 1.95.95-1.95.95L12 17l-.95-1.95-1.95-.95 1.95-.95z"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M15.5 4H18a2 2 0 0 1 2 2v2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5M8.5 20H6a2 2 0 0 1-2-2v-2.5"/><path d="M7.5 12h9"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 14.5V17a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-2.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4.5V15M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 14.5V17a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-2.5"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9.5M18.5 7H20M4 17h3.5M12.5 17H20"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="17" r="2.5"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 0 1 4.7.7c0 1.6-2.4 2-2.4 3.6"/><path d="M12 17.1v.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.3M12 7.8v.1"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A7.8 7.8 0 1 1 9.4 4.5a6.3 6.3 0 0 0 10.1 10.1z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 2.8v5.1c0 4.3-3 7.7-7 9.1-4-1.4-7-4.8-7-9.1V6.3z"/><path d="M9 12h6"/></symbol>
+    <symbol id="i-slash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M14.5 6.5 9 12l5.5 5.5"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9.5 6.5 15 12l-5.5 5.5"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.5 12h13"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.8v12.4a.6.6 0 0 0 .9.5l9.8-6.2a.6.6 0 0 0 0-1L8.9 5.3a.6.6 0 0 0-.9.5z"/></symbol>
+    <symbol id="i-csv" viewBox="0 0 24 24"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19M8.5 13h7M8.5 16.5h7"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8.5" class="bm-bg"/><path d="M9.5 9v14M14 9v14M18.5 9v14M23 9v14" class="bm-strokes"/><path d="M6.8 20.6 25.2 11.4" class="bm-slash"/></svg>
+      <span class="brand-name">Tallymark</span>
+      <span class="brand-tag">Drawing coverage check</span>
+    </div>
+    <div class="crumb" id="crumb" hidden><span>/</span><span id="crumb-file"></span></div>
+    <div class="topbar-actions">
+      <span class="pill-sim" id="pill-sim" hidden><span class="dot"></span>Simulated export</span>
+      <button class="btn btn-primary btn-sm" id="btn-export" hidden title="Export exceptions (Ctrl+E)"><svg class="i"><use href="#i-download"/></svg><span>Export exceptions</span></button>
+      <button class="btn btn-sm" id="btn-rerun" hidden><svg class="i"><use href="#i-refresh"/></svg><span>Rerun</span></button>
+      <button class="btn btn-sm btn-quiet" id="btn-cancel" hidden><svg class="i"><use href="#i-x"/></svg><span>Cancel</span></button>
+      <button class="btn btn-sm btn-quiet" id="btn-settings"><svg class="i"><use href="#i-gear"/></svg><span class="hide-sm">Settings</span></button>
+      <button class="btn btn-sm btn-quiet btn-square" id="btn-theme" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="i only-light"><use href="#i-moon"/></svg><svg class="i only-dark"><use href="#i-sun"/></svg></button>
+      <button class="btn btn-sm btn-quiet btn-square" id="btn-help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts"><svg class="i"><use href="#i-help"/></svg></button>
+    </div>
+  </header>
+
+  <!-- Screen 1: Load -->
+  <main class="screen screen-load" id="screen-load">
+    <div class="load-wrap">
+      <h1>Check an extraction for anything left on the drawing</h1>
+      <p class="lead">Tallymark reads your drawing on its own, greys out every requirement that a Bill of Characteristics row already covers, and lights up only what no row covers. Run it after the BoC is built and before you inspect, so one missing row doesn't get your First Article report rejected.</p>
+      <ul class="explain">
+        <li><span class="ex-k">You load</span><span>the drawing (PDF or TIFF) and the BoC built from it (CSV or Excel).</span></li>
+        <li><span class="ex-k">You get</span><span>a short list of flags on the drawing: <b class="mini-u">U</b> a requirement with no row, <b class="mini-p">P</b> a "4X" style callout whose row counts fewer places.</span></li>
+        <li><span class="ex-k">You decide</span><span>confirm, exclude or dismiss each flag, then export the exceptions as a CSV.</span></li>
+      </ul>
+
+      <div class="drop-grid">
+        <section class="drop-card" id="card-drawing" data-kind="drawing">
+          <div class="drop-head">
+            <span class="head-ico"><svg class="i"><use href="#i-sheet"/></svg></span><span>Drawing</span>
+            <button class="info-btn" type="button" data-pop="pop-drawing" aria-label="About the drawing file" aria-expanded="false" aria-controls="pop-drawing"><svg class="i"><use href="#i-info"/></svg></button>
+            <span class="drop-fmt">PDF · TIFF</span>
+          </div>
+          <div class="dropzone" tabindex="0" role="button" aria-label="Drop PDF or TIFF here, or browse">
+            <svg class="i dz-ico"><use href="#i-upload"/></svg>
+            <span class="dz-hint">Drop the drawing here</span><span class="dz-browse">or browse files</span>
+          </div>
+          <div class="file-chip" hidden></div>
+          <div class="reject" hidden></div>
+          <input type="file" accept=".pdf,.tif,.tiff" hidden>
+        </section>
+        <section class="drop-card" id="card-boc" data-kind="boc">
+          <div class="drop-head">
+            <span class="head-ico"><svg class="i"><use href="#i-table"/></svg></span><span>Bill of Characteristics</span>
+            <button class="info-btn" type="button" data-pop="pop-boc" aria-label="About the Bill of Characteristics file" aria-expanded="false" aria-controls="pop-boc"><svg class="i"><use href="#i-info"/></svg></button>
+            <span class="drop-fmt">CSV · XLSX</span>
+          </div>
+          <div class="dropzone" tabindex="0" role="button" aria-label="Drop CSV or XLSX here, or browse">
+            <svg class="i dz-ico"><use href="#i-upload"/></svg>
+            <span class="dz-hint">Drop the BoC here</span><span class="dz-browse">or browse files</span>
+          </div>
+          <div class="file-chip" hidden></div>
+          <div class="reject" hidden></div>
+          <input type="file" accept=".csv,.xlsx,.xlsm" hidden>
+        </section>
+      </div>
+
+      <div class="banner banner-amber" id="banner-sim" hidden><span class="banner-i">i</span><span>Simulated export. The real extractor's column layout is not confirmed.</span></div>
+      <div class="banner banner-amber" id="banner-mismatch" hidden>
+        <span class="banner-i">!</span><span id="mismatch-text"></span>
+        <span class="banner-actions"><button class="btn btn-sm" id="mismatch-continue">Continue</button><button class="btn btn-sm btn-quiet" id="mismatch-cancel">Cancel</button></span>
+      </div>
+
+      <div class="excl-line">
+        <div class="excl-summary"><span class="muted">Exclusions:</span> <span id="excl-summary"></span></div>
+        <button class="btn btn-sm" id="btn-edit-excl"><svg class="i"><use href="#i-sliders"/></svg><span>Edit exclusions</span></button>
+      </div>
+      <div class="model-line" id="model-line"></div>
+
+      <div class="load-actions">
+        <button class="btn btn-lg" id="btn-sample" title="Loads a public NIST test drawing (3 sheets) and a simulated BoC"><svg class="i"><use href="#i-sample"/></svg><span>Use sample drawing</span></button>
+        <span class="tip-wrap" id="run-tip"><button class="btn btn-primary btn-lg" id="btn-run" disabled><svg class="i"><use href="#i-scan"/></svg><span>Run check</span></button></span>
+      </div>
+      <div class="ack" id="ack" hidden>Drawing: NIST MBE PMI test case FTC-06, used with acknowledgment.</div>
+
+      <!-- Sneak peek: a looping, captioned miniature of the results screen. Driven by wirePeek() in app.js. -->
+      <section class="peek" id="peek" data-step="1" aria-labelledby="peek-title">
+        <div class="peek-head">
+          <div>
+            <div class="eyebrow">Sneak peek</div>
+            <h2 id="peek-title">What happens after you click Run check</h2>
+          </div>
+          <button class="btn btn-sm btn-quiet" id="peek-toggle" aria-pressed="false"><svg class="i pk-ico-pause"><use href="#i-pause"/></svg><svg class="i pk-ico-play"><use href="#i-play"/></svg><span id="peek-toggle-label">Pause</span></button>
+        </div>
+        <div class="peek-body">
+          <div class="pk-app" aria-hidden="true">
+            <div class="pk-strip">
+              <div class="pk-strip-a"><span class="pk-spin"></span><span>Checking 1 sheet against 45 rows</span><span class="pk-prog"><i></i></span></div>
+              <div class="pk-strip-b">
+                <span class="pk-big">2</span><span class="pk-big-l">unaccounted</span>
+                <span class="pk-covbar"><i class="c"></i><i class="l"></i></span>
+                <span class="pk-rev"><span class="pk-rev-a">0 of 2 reviewed</span><span class="pk-rev-b">All 2 reviewed</span></span>
+                <span class="pk-export"><svg class="i"><use href="#i-download"/></svg>Export</span>
+              </div>
+            </div>
+            <div class="pk-work">
+              <div class="pk-canvas">
+                <div class="pk-stage">
+                  <img src="assets/peek-sheet1.webp?v=5" alt="" width="1100" height="850" draggable="false">
+                  <svg class="pk-over" viewBox="0 0 1000 773" preserveAspectRatio="none">
+                    <defs>
+                      <mask id="pk-veil-mask"><rect width="1000" height="773" fill="white"/><rect x="64" y="301" width="203" height="43" rx="4" fill="black"/><rect x="474" y="578" width="97" height="71" rx="4" fill="black"/></mask>
+                    </defs>
+                    <rect class="pk-veil" width="1000" height="773" mask="url(#pk-veil-mask)"/>
+                    <g class="pk-read">
+                      <rect style="--i:0" x="633" y="127" width="79" height="53"/><rect style="--i:1" x="650" y="141" width="87" height="58"/>
+                      <rect style="--i:2" x="690" y="177" width="113" height="83"/><rect style="--i:3" x="774" y="228" width="72" height="64"/>
+                      <rect style="--i:4" x="67" y="304" width="197" height="37"/><rect style="--i:5" x="134" y="366" width="153" height="141"/>
+                      <rect style="--i:6" x="198" y="500" width="141" height="90"/><rect style="--i:7" x="798" y="375" width="124" height="120"/>
+                      <rect style="--i:8" x="389" y="595" width="54" height="34"/><rect style="--i:9" x="477" y="581" width="107" height="80"/>
+                    </g>
+                    <g class="pk-covg">
+                      <rect class="pk-cov" style="--i:0" x="633" y="127" width="79" height="53" rx="3"/>
+                      <rect class="pk-cov" style="--i:1" x="650" y="141" width="87" height="58" rx="3"/>
+                      <rect class="pk-cov" style="--i:2" x="690" y="177" width="99" height="65" rx="3"/>
+                      <rect class="pk-cov" style="--i:3" x="693" y="186" width="110" height="74" rx="3"/>
+                      <rect class="pk-cov" style="--i:4" x="774" y="228" width="72" height="54" rx="3"/>
+                      <rect class="pk-cov" style="--i:4" x="781" y="275" width="20" height="17" rx="3"/>
+                      <rect class="pk-cov" style="--i:5" x="202" y="366" width="85" height="57" rx="3"/>
+                      <rect class="pk-cov" style="--i:5" x="182" y="389" width="102" height="67" rx="3"/>
+                      <rect class="pk-cov" style="--i:6" x="134" y="409" width="152" height="97" rx="3"/>
+                      <rect class="pk-cov" style="--i:6" x="169" y="430" width="114" height="77" rx="3"/>
+                      <rect class="pk-cov" style="--i:7" x="220" y="500" width="85" height="56" rx="3"/>
+                      <rect class="pk-cov" style="--i:7" x="198" y="509" width="117" height="75" rx="3"/>
+                      <rect class="pk-cov" style="--i:8" x="222" y="511" width="117" height="79" rx="3"/>
+                      <rect class="pk-cov" style="--i:8" x="804" y="375" width="118" height="77" rx="3"/>
+                      <rect class="pk-cov" style="--i:9" x="798" y="419" width="97" height="76" rx="3"/>
+                      <rect class="pk-cov" style="--i:9" x="482" y="593" width="102" height="68" rx="3"/>
+                      <rect class="pk-cov" style="--i:9" x="389" y="595" width="54" height="34" rx="3"/>
+                    </g>
+                    <g class="pk-flag pk-flag-u">
+                      <rect class="pk-box" x="64" y="301" width="203" height="43" rx="4"/>
+                      <rect class="pk-tagbg" x="64" y="268" width="54" height="30" rx="5"/><text x="91" y="290">U-1</text>
+                    </g>
+                    <g class="pk-flag pk-flag-p">
+                      <rect class="pk-box" x="474" y="578" width="97" height="71" rx="4"/>
+                      <rect class="pk-tagbg" x="474" y="545" width="54" height="30" rx="5"/><text x="501" y="567">P-1</text>
+                    </g>
+                  </svg>
+                  <div class="pk-scan"></div>
+                </div>
+                <div class="pk-detail">
+                  <div class="pk-detail-t"><b>U-1</b><span>Note 4 has no BoC row</span></div>
+                  <div class="pk-detail-a"><span class="pk-btn pk-btn-c"><svg class="i"><use href="#i-check"/></svg>Confirm miss</span><span class="pk-btn">Exclude</span><span class="pk-btn">Dismiss</span></div>
+                </div>
+                <div class="pk-file"><svg class="i"><use href="#i-csv"/></svg><span><b>ftc06_exceptions.csv</b><small>2 rows, both confirmed</small></span><svg class="i pk-file-ok"><use href="#i-check"/></svg></div>
+              </div>
+              <div class="pk-side">
+                <div class="pk-boc">
+                  <div class="pk-side-t">BoC rows</div>
+                  <div class="pk-row" style="--i:0"><span class="cn">1</span><span class="rq">2X CR.50 ±.02</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-row" style="--i:1"><span class="cn">2</span><span class="rq">24X R.125 ±.020</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-row" style="--i:2"><span class="cn">3</span><span class="rq">2X SØ1.250 ±.008</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-row" style="--i:3"><span class="cn">4</span><span class="rq">⌖ SØ.025 D B C</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-row" style="--i:4"><span class="cn">7</span><span class="rq">2X Ø.562 ±.008</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-row" style="--i:5"><span class="cn">19</span><span class="rq">4X Ø.281, 1 pl</span><span class="tk"><svg class="i"><use href="#i-check"/></svg></span></div>
+                  <div class="pk-more">+ 39 more rows</div>
+                </div>
+                <div class="pk-flags">
+                  <div class="pk-side-t">Flags</div>
+                  <div class="pk-fl pk-fl-u"><span class="pk-ft">U</span><span class="pk-fb"><b>U-1 · Sheet 1</b><span>Note 4 has no row</span><em><span class="o">Open</span><span class="d">Confirmed miss</span></em></span></div>
+                  <div class="pk-fl pk-fl-p"><span class="pk-ft">P</span><span class="pk-fb"><b>P-1 · Sheet 1</b><span>Callout says 4X, row says 1</span><em><span class="o">Open</span><span class="d">Confirmed miss</span></em></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <ol class="peek-steps" id="peek-steps">
+            <li><button type="button" data-step="1"><span class="n">1</span><span class="t"><b>Load</b><span>The drawing and its BoC go in.</span></span></button></li>
+            <li><button type="button" data-step="2"><span class="n">2</span><span class="t"><b>Read</b><span>Every mark on the drawing is read on its own, without the BoC.</span></span></button></li>
+            <li><button type="button" data-step="3"><span class="n">3</span><span class="t"><b>Match</b><span>Each row ticks off and the region it covers turns grey.</span></span></button></li>
+            <li><button type="button" data-step="4"><span class="n">4</span><span class="t"><b>Flag</b><span>What no row covers stays lit: U for a missing row, P for a short place count.</span></span></button></li>
+            <li><button type="button" data-step="5"><span class="n">5</span><span class="t"><b>Review</b><span>You confirm, exclude or dismiss each flag.</span></span></button></li>
+            <li><button type="button" data-step="6"><span class="n">6</span><span class="t"><b>Export</b><span>The exceptions go out as a small CSV.</span></span></button></li>
+          </ol>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Screen 2: Processing -->
+  <main class="screen screen-processing" id="screen-processing" hidden>
+    <aside class="rail" id="proc-rail"><div class="rail-title">SHEETS</div><div id="proc-thumbs"></div></aside>
+    <div class="proc-center">
+      <div class="proc-grid">
+        <div class="proc-sheet">
+          <div class="proc-sheet-inner" id="proc-sheet"><div class="proc-placeholder"></div></div>
+          <div class="scanline"></div>
+        </div>
+        <div class="proc-side">
+          <div class="proc-title" id="proc-title">Checking the drawing</div>
+          <ol class="stages" id="stages"></ol>
+          <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+          <div class="progress-foot"><span id="progress-pct">0%</span><button class="link-btn" id="proc-cancel">Cancel</button></div>
+          <div class="banner banner-red" id="proc-error" hidden>
+            <span id="proc-error-text"></span>
+            <span class="banner-actions">
+              <button class="btn btn-sm" id="err-retry">Retry</button>
+              <button class="btn btn-sm" id="err-skip" hidden></button>
+              <button class="btn btn-sm btn-quiet" id="err-back">Back</button>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Screen 3: Results -->
+  <main class="screen screen-results" id="screen-results" hidden>
+    <div class="summary" id="summary"></div>
+    <div id="result-banners"></div>
+    <div class="workspace">
+      <aside class="rail" id="rail"><div class="rail-title">SHEETS</div><div id="thumbs"></div></aside>
+      <section class="canvas-col">
+        <div class="toolbar">
+          <select class="sheet-select" id="sheet-select" aria-label="Sheet"></select>
+          <button class="btn btn-xs" id="tb-fit" title="Fit sheet (F)"><svg class="i"><use href="#i-fit"/></svg><span>Fit</span></button>
+          <button class="btn btn-xs btn-square" id="tb-in" title="Zoom in (+)" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
+          <button class="btn btn-xs btn-square" id="tb-out" title="Zoom out (-)" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+          <span class="tb-sep"></span>
+          <div class="seg" role="group" aria-label="View">
+            <button id="tb-faded" aria-pressed="true" title="Toggle Faded / Original (O)">Faded</button>
+            <button id="tb-original" aria-pressed="false" title="Toggle Faded / Original (O)">Original</button>
+          </div>
+          <div class="legend">
+            <span><i class="lg lg-u"></i>U unaccounted</span>
+            <span><i class="lg lg-p"></i>P places</span>
+            <span><i class="lg lg-c"></i>covered</span>
+            <span class="tb-page" id="tb-page"></span>
+          </div>
+        </div>
+        <div class="viewport" id="viewport">
+          <div class="stage" id="stage">
+            <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div class="tags" id="tags"></div>
+          </div>
+          <div class="hover-tip" id="hover-tip" hidden></div>
+        </div>
+      </section>
+      <aside class="flags-col">
+        <div class="flags-head">
+          <div class="flags-title-row"><span class="rail-title">FLAGS</span><span class="muted mono small">sorted by sheet, zone</span></div>
+          <div class="chips" id="chips"></div>
+        </div>
+        <div class="flag-list" id="flag-list" role="listbox" aria-label="Flags"></div>
+      </aside>
+    </div>
+    <section class="detail" id="detail" hidden></section>
+  </main>
+</div>
+
+<!-- overlays -->
+<div class="toast" id="toast" hidden><span id="toast-text"></span><button class="link-btn light" id="toast-undo">Undo</button></div>
+
+<!-- Info popovers for the two load cards. Opened on hover, focus or click by wireInfoPops() in app.js. -->
+<div class="info-pop" id="pop-drawing" role="dialog" aria-labelledby="pop-drawing-title" hidden>
+  <div class="ip-head"><div class="ip-title" id="pop-drawing-title">The drawing</div><button class="ip-close" type="button" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <p>The engineering drawing of the part, every sheet. It is the file the inspector measures against, at the same revision the BoC was built from.</p>
+  <figure class="ip-fig ip-draw">
+    <div class="ipd-frame">
+      <img src="assets/drawing-crop.webp?v=5" alt="Corner of an engineering drawing with dimension and tolerance callouts" width="640" height="619">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <g class="ipd-b" style="--i:0"><circle cx="17.6" cy="11.6" r="3.4"/><text x="17.6" y="12.9">1</text></g>
+        <g class="ipd-b" style="--i:1"><circle cx="22" cy="16" r="3.4"/><text x="22" y="17.3">2</text></g>
+        <g class="ipd-b" style="--i:2"><circle cx="31.9" cy="26.2" r="3.4"/><text x="31.9" y="27.5">3</text></g>
+        <g class="ipd-b" style="--i:3"><circle cx="32.8" cy="36.8" r="3.4"/><text x="32.8" y="38.1">4</text></g>
+        <g class="ipd-b" style="--i:4"><circle cx="53" cy="38.1" r="3.4"/><text x="53" y="39.4">5</text></g>
+        <g class="ipd-b" style="--i:5"><circle cx="54.7" cy="45.4" r="3.4"/><text x="54.7" y="46.7">6</text></g>
+        <g class="ipd-b" style="--i:6"><circle cx="60.5" cy="71.5" r="3.4"/><text x="60.5" y="72.8">7</text></g>
+        <g class="ipd-b" style="--i:7"><circle cx="60.5" cy="79" r="3.4"/><text x="60.5" y="80.3">8</text></g>
+        <g class="ipd-b" style="--i:8"><circle cx="58.9" cy="90.1" r="3.4"/><text x="58.9" y="91.4">9</text></g>
+      </svg>
+    </div>
+    <figcaption>Balloons are optional. Tallymark reads the drawing text itself, so a clean drawing works the same.</figcaption>
+  </figure>
+  <dl class="ip-facts">
+    <dt>Formats</dt><dd>PDF (vector or scanned) or TIFF</dd>
+    <dt>Limits</dt><dd>Up to 50 MB and 20 sheets</dd>
+  </dl>
+</div>
+
+<div class="info-pop" id="pop-boc" role="dialog" aria-labelledby="pop-boc-title" hidden>
+  <div class="ip-head"><div class="ip-title" id="pop-boc-title">The Bill of Characteristics</div><button class="ip-close" type="button" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <p>The list your extraction tool built from the drawing: one row per requirement, the same list that becomes AS9102 Form 3. Tallymark checks it against the drawing.</p>
+  <figure class="ip-fig ip-boc">
+    <table>
+      <thead><tr><th>Char No</th><th>Location</th><th>Requirement</th><th>Places</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>1</td><td>Sh 1 · D3</td><td>2X CR.50 ±.02</td><td>2</td></tr>
+        <tr style="--i:1"><td>2</td><td>Sh 1 · D3</td><td>24X R.125 ±.020</td><td>24</td></tr>
+        <tr style="--i:2"><td>3</td><td>Sh 1 · C3</td><td>2X SØ1.250 ±.008</td><td>2</td></tr>
+        <tr style="--i:3"><td>4</td><td>Sh 1 · C3</td><td>⌖ SØ.025 D B C</td><td>2</td></tr>
+        <tr style="--i:4"><td>5</td><td>Sh 1 · C2</td><td>⌓ .02 A B C</td><td>1</td></tr>
+      </tbody>
+    </table>
+    <figcaption>Five rows from the sample file. Location boxes are optional; rows without them are placed by matching text.</figcaption>
+  </figure>
+  <dl class="ip-facts">
+    <dt>Formats</dt><dd>CSV or Excel (.xlsx, .xlsm), including an AS9102 Form 3 sheet</dd>
+    <dt>Needs</dt><dd><span class="mono">char_no</span>, <span class="mono">sheet</span> (or a "Sheet 2, zone B3" location), <span class="mono">requirement</span></dd>
+    <dt>Helps</dt><dd><span class="mono">places</span> and the location box <span class="mono">bbox_x, bbox_y, bbox_w, bbox_h</span></dd>
+  </dl>
+</div>
+
+<div class="popover" id="rule-pop" hidden>
+  <div class="pop-title">Reason</div>
+  <div class="pop-presets" id="rule-presets"></div>
+  <input class="input" id="rule-note" placeholder="Add a note..." maxlength="200">
+  <div class="pop-foot"><button class="btn btn-sm btn-quiet" id="rule-cancel">Cancel</button><button class="btn btn-sm btn-primary" id="rule-save">Save</button></div>
+</div>
+
+<div class="modal-back" id="export-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <div class="modal-head"><div id="export-title">Export exceptions</div><button class="btn btn-xs btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="modal-body">
+      <div class="export-opts">
+        <label><input type="checkbox" id="export-dismissed"> Include dismissed flags</label>
+        <div>Format: <span class="mono ink">CSV</span></div>
+      </div>
+      <div class="csv-preview" id="csv-preview"></div>
+      <div class="mono small muted" id="export-name"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="export-download"><svg class="i"><use href="#i-download"/></svg><span>Download CSV</span></button></div>
+  </div>
+</div>
+
+<div class="drawer-back" id="settings" hidden>
+  <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head"><div id="settings-title">Exclusions</div><button class="btn btn-xs btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="drawer-body">
+      <div id="excl-toggles"></div>
+      <div class="field">
+        <label for="excl-regex">Also ignore text matching</label>
+        <input class="input mono" id="excl-regex" placeholder="^(SECTION|DETAIL|VIEW)\b" spellcheck="false">
+      </div>
+      <p class="foot-note">Rules differ by customer. Exclusions only hide regions, they never delete BoC rows.</p>
+
+      <div class="drawer-section">Model check</div>
+      <p class="foot-note">Only ambiguous leftovers (a bare number with no tolerance or frame) are shown to the model, as a crop. Rules decide every other flag.</p>
+      <div class="field">
+        <label for="provider-select">Provider</label>
+        <select class="input" id="provider-select"></select>
+      </div>
+      <div class="field">
+        <label for="model-select">Model</label>
+        <select class="input" id="model-select"></select>
+      </div>
+      <div class="field">
+        <label for="api-key" id="api-key-label">API key</label>
+        <input class="input mono" id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+        <div class="key-row">
+          <button class="btn btn-sm" id="key-save">Save key</button>
+          <button class="btn btn-sm" id="key-test">Test</button>
+          <button class="btn btn-sm btn-quiet" id="key-clear">Clear</button>
+        </div>
+        <div class="key-status" id="key-status"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="use-llm" checked> Use the model on ambiguous leftovers</label>
+      <p class="foot-note">Works with an Anthropic, OpenAI or Google Gemini key: paste any of them and the provider is picked from the key. Keys stay in the local server's memory and are never written to run files. Claude Pro/Max subscription tokens (sk-ant-oat...) are meant for Claude Code; the API may reject them here, so a Console API key is the reliable option.</p>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="help" hidden>
+  <div class="modal modal-help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="modal-body">
+      <div class="help-title" id="help-title">Tallymark keyboard shortcuts</div>
+      <div class="shortcuts" id="shortcuts"></div>
+      <div class="small muted">Press ? or click anywhere to close.</div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=5"></script>
+</body>
+</html>
