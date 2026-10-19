@@ -76,6 +76,14 @@ Tallymark is that proof step, automated and explainable:
     <td><img src="docs/screenshots/tour.png" alt="Guided tour"><br><sub><b>Guided tour</b> on first run, replayable from Help</sub></td>
     <td><img src="docs/screenshots/results-dark.png" alt="Dark theme"><br><sub><b>Dark theme</b> on request (light by default)</sub></td>
   </tr>
+  <tr>
+    <td><img src="docs/screenshots/decision-timeline.png" alt="Decision timeline"><br><sub><b>How was this decided?</b> every step behind a flag, rule and AI clearly labelled</sub></td>
+    <td><img src="docs/screenshots/inspect-mode.png" alt="Inspect mode"><br><sub><b>Inspect:</b> click any text to see why it was or wasn't flagged</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/run-report.png" alt="Run report"><br><sub><b>Run report:</b> funnel, stage timings, every AI call, audit trail download</sub></td>
+    <td><img src="docs/screenshots/byok.png" alt="Bring your own key"><br><sub><b>Bring your own key:</b> kept in your browser tab, never stored on the server</sub></td>
+  </tr>
 </table>
 
 ---
