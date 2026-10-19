@@ -276,6 +276,96 @@ async function useSample() {
   }
 }
 
+/* ------------------------------------------------------------------ sample pairs (samples/pairs/) */
+// Five drawing + BoC pairs with planted misses and an answer key each. Downloads come from GitHub;
+// "Load into Tallymark" fetches the same files from this server (/sample-pairs/) and fills both boxes.
+const PAIRS_RAW = "https://github.com/PedroHang/radhires-tallymark/raw/main/samples/pairs";
+const PAIRS_PAGE = "https://github.com/PedroHang/radhires-tallymark/blob/main/samples/pairs";
+const SAMPLE_PAIRS = [
+  { id: "01-ftc06-clean-form3", tag: "ftc06", name: "FTC-06, complete BoC", sheets: 3, fmt: "Form 3 .xlsx", boc: "boc.xlsx",
+    what: "Nothing planted: every requirement has a row.", expect: "0 flags", flags: "nothing missing" },
+  { id: "02-ftc06-four-misses-csv", tag: "ftc06", name: "FTC-06, four misses", sheets: 3, fmt: "CSV with coordinates", boc: "boc.csv",
+    what: "3 rows deleted (one per sheet) and one 4X row set to 1 place. Same as Use sample drawing.", expect: "4 flags", flags: "U-1, P-1, U-2, U-3" },
+  { id: "03-ctc04-form3-misses", tag: "ctc04", name: "CTC-04, Form 3 with misses", sheets: 1, fmt: "Form 3 .xlsx", boc: "boc.xlsx",
+    what: "A profile frame and a 30X hole row deleted; the 4X M12 thread row set to 1 place.", expect: "3 flags", flags: "P-1, U-1, U-2" },
+  { id: "04-ctc03-csv-misses", tag: "ctc03", name: "CTC-03, CSV with misses", sheets: 1, fmt: "CSV with coordinates", boc: "boc.csv",
+    what: "A profile frame and a diameter row deleted; the 4X .82 row set to 1 place.", expect: "3 flags", flags: "U-1, U-2, P-1" },
+  { id: "05-ftc11-multisheet", tag: "ftc11", name: "FTC-11, misses on 2 sheets", sheets: 2, fmt: "CSV with coordinates", boc: "boc.csv",
+    what: "A diameter deleted on sheet 1; a profile frame deleted and 2X R0.1 set to 1 place on sheet 2.", expect: "3 flags", flags: "U-1, U-2, P-1" },
+];
+
+function renderPairs() {
+  $("#pairs-list").innerHTML = SAMPLE_PAIRS.map((p) => {
+    const no = p.id.slice(0, 2);
+    const raw = `${PAIRS_RAW}/${p.id}`;
+    return `
+    <li class="pair" aria-labelledby="pair-${no}-name">
+      <div class="pair-head">
+        <span class="pair-no" aria-hidden="true">${no}</span>
+        <div class="pair-title">
+          <div class="pair-name" id="pair-${no}-name">${esc(p.name)}</div>
+          <div class="pair-meta"><span class="pair-fmt">${esc(p.fmt)}</span><span>${p.sheets} sheet${p.sheets === 1 ? "" : "s"}</span></div>
+        </div>
+        <div class="pair-expect"><b>${esc(p.expect)}</b><span>${esc(p.flags)}</span></div>
+      </div>
+      <p class="pair-what">${esc(p.what)}</p>
+      <div class="pair-actions">
+        <button type="button" class="btn btn-sm btn-primary" data-load-pair="${p.id}">${icon("upload")}<span>Load into Tallymark</span></button>
+        <a class="btn btn-sm" href="${raw}/drawing.pdf" download aria-label="Download the drawing of pair ${no} (PDF)">${icon("download")}<span>Drawing</span></a>
+        <a class="btn btn-sm" href="${raw}/${p.boc}" download aria-label="Download the BoC of pair ${no} (${p.boc.endsWith("xlsx") ? "Excel" : "CSV"})">${icon("download")}<span>BoC</span></a>
+        <a class="btn btn-sm btn-quiet" href="${PAIRS_PAGE}/${p.id}/ANSWER-KEY.md" target="_blank" rel="noopener" aria-label="Answer key of pair ${no} (opens on GitHub)">${icon("check")}<span>Answer key</span></a>
+      </div>
+    </li>`;
+  }).join("");
+  $$("#pairs-list [data-load-pair]").forEach((b) => (b.onclick = () => loadPair(b.dataset.loadPair, b)));
+}
+
+function openPairs() {
+  if (!$("#pairs-list").children.length) renderPairs();
+  $("#pairs-modal").hidden = false;
+  $("#pairs-list [data-load-pair]")?.focus();
+}
+
+// Keep Tab inside the dialog while it is open.
+function trapPairsFocus(e) {
+  if (e.key !== "Tab") return;
+  const items = $$("#pairs-modal a[href], #pairs-modal button:not([disabled])").filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+async function loadPair(id, btn) {
+  const p = SAMPLE_PAIRS.find((x) => x.id === id);
+  if (!p) return;
+  const label = btn ? $("span", btn) : null;
+  if (btn) { btn.disabled = true; label.textContent = "Loading..."; }
+  try {
+    const get = async (file, name) => {
+      const res = await fetch(`/sample-pairs/${id}/${file}`);
+      if (!res.ok) throw new Error(`${file} could not be fetched (${res.status})`);
+      return new File([await res.blob()], name);
+    };
+    const no = id.slice(0, 2);
+    const [d, b] = await Promise.all([get("drawing.pdf", `pair${no}-${p.tag}-drawing.pdf`), get(p.boc, `pair${no}-${p.tag}-${p.boc}`)]);
+    closeOverlays();
+    let aiNote = "";
+    if (state.useLlm && llm().keySet) {
+      state.useLlm = false;
+      $("#use-llm").checked = false;
+      aiNote = " The AI check is now off, as in the answer key.";
+    }
+    await Promise.all([acceptFile("drawing", d), acceptFile("boc", b)]);
+    toast(`Pair ${no} loaded. Expected: ${p.expect} (${p.flags}). Click Run check.${aiNote}`);
+    $("#btn-run")?.focus();
+  } catch (e) {
+    toast(`That pair could not load: ${e.message}. Use the download links instead.`);
+  } finally {
+    if (btn) { btn.disabled = false; label.textContent = "Load into Tallymark"; }
+  }
+}
+
 async function startRun(force = false) {
   const d = state.files.drawing, b = state.files.boc;
   if (!d || !b || d.error || b.error) return;
@@ -1291,8 +1381,12 @@ function wireHelpMenu() {
 
 function closeOverlays() {
   let closed = closeInfoPop() || closeHelpMenu();
-  for (const id of ["#help", "#export-modal", "#settings", "#rule-pop"]) {
-    if (!$(id).hidden) { $(id).hidden = true; closed = true; }
+  for (const id of ["#help", "#export-modal", "#settings", "#rule-pop", "#pairs-modal"]) {
+    if (!$(id).hidden) {
+      $(id).hidden = true;
+      closed = true;
+      if (id === "#pairs-modal" && state.screen === "load") $("#btn-pairs")?.focus();
+    }
   }
   return closed;
 }
@@ -1732,7 +1826,7 @@ function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "e") { e.preventDefault(); openExport(); return; }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); undoLast(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (!$("#export-modal").hidden || !$("#settings").hidden || !$("#help").hidden) return;
+  if (!$("#export-modal").hidden || !$("#settings").hidden || !$("#help").hidden || !$("#pairs-modal").hidden) return;
   const k = e.key.toLowerCase();
   const sheets = state.run.sheets_checked || [1];
   const filterTo = (f) => { if (state.panel !== "flags") setPanel("flags"); state.filter = f; renderChips(); renderList(); };
@@ -1938,6 +2032,9 @@ async function boot() {
   wirePeek();
   renderHelp();
   $("#btn-sample").onclick = useSample;
+  $("#btn-pairs").onclick = openPairs;
+  $("#pairs-modal").onclick = (e) => { if (e.target.id === "pairs-modal") closeOverlays(); };
+  $("#pairs-modal").addEventListener("keydown", trapPairsFocus);
   $("#btn-run").onclick = () => startRun(false);
   $("#mismatch-continue").onclick = () => startRun(true);
   $("#mismatch-cancel").onclick = () => ($("#banner-mismatch").hidden = true);

@@ -13,7 +13,7 @@
   })();
 </script>
 <script>(function(){var s=100;try{s=parseInt(localStorage.getItem("tallymark.uiScale"),10)||100}catch(e){}if([85,90,100,110,120,130].indexOf(s)<0)s=100;var d=document.documentElement;d.style.setProperty("--tally-ui-zoom",String(s/100));if(s!==100)d.style.zoom=String(s/100);d.setAttribute("data-ui-scale",String(s));})();</script>
-<link rel="stylesheet" href="app.css?v=8">
+<link rel="stylesheet" href="app.css?v=9">
 <link rel="stylesheet" href="layout-tools.css?v=8">
 <link rel="stylesheet" href="boc-view.css?v=8">
 <link rel="stylesheet" href="tour.css?v=8">
@@ -160,6 +160,10 @@
       <div class="load-actions">
         <button class="btn btn-lg" id="btn-sample" title="Loads a public NIST test drawing (3 sheets) and a simulated BoC"><svg class="i"><use href="#i-sample"/></svg><span>Use sample drawing</span></button>
         <span class="tip-wrap" id="run-tip"><button class="btn btn-primary btn-lg" id="btn-run" disabled><svg class="i"><use href="#i-scan"/></svg><span>Run check</span></button></span>
+      </div>
+      <div class="pairs-line">
+        <span class="pairs-line-t">Want to test with other files?</span>
+        <button type="button" class="link-btn pairs-open" id="btn-pairs" aria-haspopup="dialog" aria-controls="pairs-modal"><svg class="i" aria-hidden="true"><use href="#i-table"/></svg><span>Get 5 sample pairs to test</span></button>
       </div>
       <div class="ack" id="ack" hidden>Drawing: NIST MBE PMI test case FTC-06, used with acknowledgment.</div>
 
@@ -433,6 +437,20 @@
   <div class="pop-foot"><button class="btn btn-sm btn-quiet" id="rule-cancel">Cancel</button><button class="btn btn-sm btn-primary" id="rule-save">Save</button></div>
 </div>
 
+<div class="modal-back" id="pairs-modal" hidden>
+  <div class="modal modal-pairs" role="dialog" aria-modal="true" aria-labelledby="pairs-title" aria-describedby="pairs-intro">
+    <div class="modal-head"><div id="pairs-title">5 sample pairs to test</div><button class="btn btn-sm btn-quiet btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="modal-body">
+      <p class="pairs-intro" id="pairs-intro">Each pair is a public NIST test drawing, a Bill of Characteristics with misses planted on purpose, and a short answer key. Load a pair, leave <b>Use the AI</b> off, run the check, then compare the flags with the answer key. The BoCs are synthetic, built for testing: none is a real customer BoC.</p>
+      <ol class="pairs-list" id="pairs-list"></ol>
+    </div>
+    <div class="modal-foot pairs-foot">
+      <a class="btn btn-quiet" href="https://github.com/PedroHang/radhires-tallymark/tree/main/samples/pairs" target="_blank" rel="noopener">How they were built</a>
+      <a class="btn btn-primary" id="pairs-zip" href="https://github.com/PedroHang/radhires-tallymark/raw/main/samples/pairs/tallymark-sample-pairs.zip"><svg class="i"><use href="#i-download"/></svg><span>Download all (zip, 0.5 MB)</span></a>
+    </div>
+  </div>
+</div>
+
 <div class="modal-back" id="export-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="export-title">
     <div class="modal-head"><div id="export-title">Export exceptions</div><button class="btn btn-sm btn-quiet btn-square" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
@@ -501,7 +519,7 @@
 <script src="layout-tools.js?v=8"></script>
 <script src="boc-view.js?v=8"></script>
 <script src="trace-view.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 <script src="tour.js?v=8"></script>
 </body>
 </html>

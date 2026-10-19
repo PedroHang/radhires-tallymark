@@ -26,6 +26,7 @@ The quality engineer checks 4 items instead of hunting through 200.
 
 **[📄 Read the 3-page design document](docs/Tallymark-Design-Document.pdf)** ·
 [Quick start](#-quick-start) ·
+[Try your own files](#-try-your-own-files) ·
 [How it works](#-how-it-works) ·
 [Is it any good?](#-is-it-any-good) ·
 [Real vs stubbed](#-whats-real-and-whats-stubbed)
@@ -106,6 +107,22 @@ Open **http://localhost:8031**, click **Use sample drawing**, then **Run check**
   AI check for ambiguous items (see [Model providers](#-model-providers)).
 - Want your own files? A ready-made pair lives in [`samples/`](samples): the public NIST FTC-06
   drawing and a BoC with four planted misses.
+
+### 🧪 Try your own files
+
+Five ready-to-test pairs live in [`samples/pairs/`](samples/pairs): a public NIST test drawing, a
+BoC (AS9102 Form 3 `.xlsx` or CSV, with and without coordinates, one to three sheets) and a short
+answer key each. One pair is complete (expect **0 flags**); the others have 3 or 4 misses planted on
+purpose (deleted rows, a lowered places count). The BoCs are synthetic, built for testing.
+
+- In the app: click **Get 5 sample pairs to test** under **Use sample drawing**, then **Load into
+  Tallymark** on any pair (or download its files).
+- Or download [all five as one zip](https://github.com/PedroHang/radhires-tallymark/raw/main/samples/pairs/tallymark-sample-pairs.zip)
+  (0.5 MB) and drop the files in yourself.
+- Leave **Use the AI** off, run the check and compare with the pair's `ANSWER-KEY.md`. Every
+  expected result was produced by the real pipeline, rules only.
+
+<p align="center"><img src="docs/screenshots/sample-pairs.png" alt="The sample pairs dialog: five pairs, each with Load into Tallymark, Drawing, BoC and Answer key buttons" width="720"></p>
 
 ---
 
