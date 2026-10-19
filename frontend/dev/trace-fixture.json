@@ -1,0 +1,1192 @@
+{
+ "_note": "FIXTURE for frontend/dev/trace-demo.html. Shapes follow docs/TRACE.md and docs/INVESTIGATOR.md; the values are invented and no model was called.",
+ "catalog": {
+  "version": "2026-10-19.1",
+  "rules": {
+   "R1": {
+    "label": "Toleranced dimension",
+    "explain": "A number with a plus/minus tolerance, like .500 ±.008.",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R2": {
+    "label": "Limit dimension",
+    "explain": "An upper and a lower limit on one line, like 1.248-1.252.",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R3": {
+    "label": "Size callout",
+    "explain": "A diameter, radius or thread callout with a number, like Ø.250 or M8.",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R4": {
+    "label": "Feature control frame",
+    "explain": "A tolerance frame: a box with a tolerance value and datum letters.",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R5": {
+    "label": "Numbered note",
+    "explain": "A numbered note that imposes a requirement, like 5. BREAK EDGES .010 MAX.",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R6": {
+    "label": "Specification reference",
+    "explain": "A material or process specification is called out (AMS, ASTM, MIL, SAE, ISO).",
+    "outcome": "requirement",
+    "base": 0.9
+   },
+   "R7": {
+    "label": "Surface finish",
+    "explain": "Looks like a surface finish value, like 63 Ra. Starts at Medium confidence.",
+    "outcome": "requirement",
+    "base": 0.6
+   },
+   "R8": {
+    "label": "Ambiguous number",
+    "explain": "A number with no tolerance and no frame. It may be a requirement or a label, so the AI check is asked.",
+    "outcome": "ambiguous",
+    "base": 0.6
+   },
+   "R9": {
+    "label": "Not used",
+    "explain": "Reserved. No check in this version produces R9.",
+    "outcome": null,
+    "base": null
+   },
+   "R10": {
+    "label": "Label or prose",
+    "explain": "Mostly words, or no numbers, and no requirement pattern. Not a requirement.",
+    "outcome": "not_requirement",
+    "base": 0.0
+   },
+   "R11": {
+    "label": "Short label",
+    "explain": "Under 3 characters, like a datum letter or an axis label. Not a requirement.",
+    "outcome": "not_requirement",
+    "base": 0.0
+   },
+   "P1": {
+    "label": "Places shortfall",
+    "explain": "A callout says nX (for example 4X) but its BoC row records fewer places or results.",
+    "outcome": "requirement",
+    "base": 0.9
+   }
+  },
+  "rule_checks": {
+   "R4_frame_grid": {
+    "label": "Inside a tolerance frame",
+    "explain": "Sits in a detected frame of 3 or more cells and has a value, datum letters, or no text at all.",
+    "rule": "R4"
+   },
+   "R1_tolerance": {
+    "label": "Plus/minus tolerance",
+    "explain": "A number followed by a ± (or +/-) tolerance.",
+    "rule": "R1"
+   },
+   "R4_frame_text": {
+    "label": "Frame text",
+    "explain": "A tolerance value followed by 1 to 3 datum letters, as OCR reads a frame.",
+    "rule": "R4"
+   },
+   "R2_limits": {
+    "label": "Limit pair",
+    "explain": "Two decimal values joined by a dash.",
+    "rule": "R2"
+   },
+   "R6_spec": {
+    "label": "Specification",
+    "explain": "Names a standard: AMS, ASTM, MIL-, SAE or ISO.",
+    "rule": "R6"
+   },
+   "R5_note": {
+    "label": "Numbered note",
+    "explain": "Starts like '5. TEXT' and has a value or a requirement word (BREAK, MAX, PER...).",
+    "rule": "R5"
+   },
+   "R3_size": {
+    "label": "Size callout",
+    "explain": "A diameter, radius, spherical or thread symbol with a number.",
+    "rule": "R3"
+   },
+   "R7_finish": {
+    "label": "Surface finish",
+    "explain": "A 2-3 digit number followed by Ra, µ or MICRO.",
+    "rule": "R7"
+   },
+   "R11_short": {
+    "label": "Too short",
+    "explain": "Fewer than 3 characters once spaces and symbols are folded.",
+    "rule": "R11"
+   },
+   "R8_bare_number": {
+    "label": "Bare number",
+    "explain": "Only a number, nothing else.",
+    "rule": "R8"
+   },
+   "R10_prose": {
+    "label": "Mostly words",
+    "explain": "At least 4 letters and twice as many letters as digits, or a long run of capitals.",
+    "rule": "R10"
+   },
+   "R8_has_digits": {
+    "label": "Numbers, no pattern",
+    "explain": "Contains digits but matched none of the patterns above.",
+    "rule": "R8"
+   },
+   "R10_fallback": {
+    "label": "No numbers, no pattern",
+    "explain": "Nothing above matched and there are no digits.",
+    "rule": "R10"
+   }
+  },
+  "check_status": {
+   "fired": {
+    "label": "Decided",
+    "explain": "The first check that matched. It decides the outcome."
+   },
+   "matched_after": {
+    "label": "Also matched",
+    "explain": "Matched too, but an earlier check had already decided."
+   },
+   "no_match": {
+    "label": "No match",
+    "explain": "This check did not match."
+   }
+  },
+  "exclusions": {
+   "title_block": {
+    "label": "Title block",
+    "explain": "Its centre is inside the title block zone of the sheet template."
+   },
+   "border": {
+    "label": "Border and zone labels",
+    "explain": "Its centre is in the border strip or a zone label margin of the sheet template."
+   },
+   "revision_block": {
+    "label": "Revision block",
+    "explain": "Its centre is inside the revision block zone of the sheet template."
+   },
+   "view_labels": {
+    "label": "View labels (SECTION A-A, DETAIL B)",
+    "explain": "Starts with SECTION, DETAIL or VIEW."
+   },
+   "reference_dims": {
+    "label": "Reference dimensions (in parentheses)",
+    "explain": "The whole text is in parentheses, which marks a reference dimension."
+   },
+   "scale_notes": {
+    "label": "Scale notes",
+    "explain": "Mentions SCALE, SHEET n OF n or VIEW ROTATED."
+   },
+   "basic_dims": {
+    "label": "Basic dimensions (boxed numbers)",
+    "explain": "A bare number inside a single box: a basic dimension, defined by a frame elsewhere."
+   },
+   "custom_regex": {
+    "label": "Custom pattern",
+    "explain": "Matched the extra regular expression set for this run."
+   }
+  },
+  "coverage_tests": {
+   "location_gate": {
+    "label": "Near the row",
+    "explain": "At least half the text box lies inside the row's box (padded about 5 pt), or its centre does."
+   },
+   "text_match": {
+    "label": "Text matches",
+    "explain": "Values agree and the text is at least 60% similar to the row's requirement."
+   },
+   "tight_overlap": {
+    "label": "Tight overlap",
+    "explain": "Values agree, the text box is 90% inside the row's box and at least 40% similar."
+   },
+   "blank_in_zone": {
+    "label": "Blank region in the row's box",
+    "explain": "No text was read, and it sits inside the row's box."
+   },
+   "blank_frame_gdt": {
+    "label": "Blank frame",
+    "explain": "A tolerance frame with no readable text inside a GD&T row's box."
+   },
+   "row_best_region": {
+    "label": "Row's best match",
+    "explain": "The row covers the best region at its location even if OCR garbled the text (half inside, at least 30% similar)."
+   },
+   "relocated_by_text": {
+    "label": "Row placed by text",
+    "explain": "The BoC row had no location, so it was placed on the region whose text matched best (score >= 80)."
+   }
+  },
+  "sources": {
+   "ocr": {
+    "label": "OCR",
+    "explain": "Read by the OCR engine (detection, angle classification, recognition) on the upright sheet."
+   },
+   "ocr_rotated": {
+    "label": "OCR, rotated pass",
+    "explain": "Read by a second OCR pass on the sheet turned ±30°, for slanted callouts."
+   },
+   "text_layer": {
+    "label": "PDF text",
+    "explain": "Taken from the PDF's own text layer."
+   },
+   "fcf_grid": {
+    "label": "Frame detector",
+    "explain": "A tolerance frame found by shape (a row of small boxes), even with no readable text."
+   }
+  },
+  "outcomes": {
+   "covered": {
+    "label": "Covered",
+    "explain": "A BoC row accounts for this text."
+   },
+   "excluded": {
+    "label": "Excluded",
+    "explain": "Hidden by an exclusion (title block, labels, reference dimensions...)."
+   },
+   "not_requirement": {
+    "label": "Not a requirement",
+    "explain": "A rule decided this text is a label or prose."
+   },
+   "dropped_by_model": {
+    "label": "Dropped by AI",
+    "explain": "Ambiguous, and the AI check said it is not a requirement."
+   },
+   "covered_by_investigator": {
+    "label": "Linked by AI, check",
+    "explain": "Ambiguous; the AI investigator found a BoC row that already states it, and the row's text and values matched. Not flagged."
+   },
+   "below_threshold": {
+    "label": "Below threshold",
+    "explain": "Looked like a requirement but scored under 0.5, so it was not flagged."
+   },
+   "merged": {
+    "label": "Merged",
+    "explain": "Overlaps a stronger flag, so it is shown as part of that flag."
+   },
+   "flagged_unaccounted": {
+    "label": "Flagged: no row",
+    "explain": "A requirement no BoC row covers (a U flag)."
+   },
+   "flagged_places": {
+    "label": "Flagged: places",
+    "explain": "Covered, but the callout's nX count is more than the row records (a P flag)."
+   }
+  },
+  "bands": {
+   "high": {
+    "label": "High",
+    "explain": "Score 0.8 or more.",
+    "min": 0.8
+   },
+   "medium": {
+    "label": "Medium",
+    "explain": "Score from 0.6 to under 0.8.",
+    "min": 0.6
+   },
+   "low": {
+    "label": "Low",
+    "explain": "Score from 0.5 to under 0.6.",
+    "min": 0.5
+   },
+   "none": {
+    "label": "Not flagged",
+    "explain": "Score under 0.5.",
+    "min": 0.0
+   }
+  },
+  "factors": {
+   "base": {
+    "label": "Rule strength",
+    "explain": "0.9 for a clear pattern, 0.6 for a surface finish or an ambiguous number."
+   },
+   "locate_factor": {
+    "label": "Location certainty",
+    "explain": "1.0 when BoC rows carry locations; 0.8 when the BoC has none or the nearest row was placed by text."
+   },
+   "llm_factor": {
+    "label": "AI check",
+    "explain": "1.0 / 0.75 / 0.5 for high / medium / low AI certainty; 0.85 when the AI check did not run; 1.0 when a rule decided."
+   }
+  },
+  "model_status": {
+   "verdict": {
+    "label": "Answered",
+    "explain": "The AI returned a verdict for this crop."
+   },
+   "no_verdict": {
+    "label": "No answer",
+    "explain": "The request was sent but no verdict came back for this crop."
+   },
+   "not_sent": {
+    "label": "Not sent",
+    "explain": "The AI check did not run for this crop."
+   }
+  },
+  "investigator_tools": {
+   "zoom": {
+    "label": "Zoomed in",
+    "explain": "Looked at a sharper, larger view of the same region."
+   },
+   "nearby_rows": {
+    "label": "Looked up nearby BoC rows",
+    "explain": "Listed the BoC rows located near the region."
+   },
+   "ocr_context": {
+    "label": "Read the text around it",
+    "explain": "Listed the OCR text next to the region."
+   },
+   "search_boc": {
+    "label": "Searched the BoC",
+    "explain": "Searched every BoC row's requirement text."
+   },
+   "submit_verdict": {
+    "label": "Gave its verdict",
+    "explain": "The investigator's final answer."
+   }
+  },
+  "llm_jobs": {
+   "investigate": {
+    "label": "Investigation",
+    "explain": "Ambiguous leftovers: the AI may call a few read-only tools (zoom, nearby rows, nearby text, BoC search) before its verdict. Capped steps, tokens and time."
+   },
+   "classify": {
+    "label": "Is it a requirement?",
+    "explain": "Ambiguous leftovers only. The answer can drop a candidate."
+   },
+   "transcribe": {
+    "label": "Transcription",
+    "explain": "Reads the text of raised flags with proper symbols. Display only, never decides."
+   }
+  },
+  "llm_errors": {
+   "disabled": {
+    "label": "Off",
+    "explain": "The AI check was turned off for this run."
+   },
+   "no_credential": {
+    "label": "No key",
+    "explain": "No API key was set for the provider."
+   },
+   "auth_failed": {
+    "label": "Key rejected",
+    "explain": "The API key was rejected."
+   },
+   "permission_denied": {
+    "label": "Not allowed",
+    "explain": "The key can't use this model."
+   },
+   "model_not_found": {
+    "label": "Unknown model",
+    "explain": "The model was not found for this key."
+   },
+   "rate_limited": {
+    "label": "Rate limited",
+    "explain": "The API rate limited the request."
+   },
+   "connection_failed": {
+    "label": "No connection",
+    "explain": "The API could not be reached."
+   },
+   "api_error": {
+    "label": "API error",
+    "explain": "The API returned an error (api_error_<status> carries the HTTP status)."
+   },
+   "unexpected": {
+    "label": "Unexpected error",
+    "explain": "Something else failed (unexpected_<ExceptionName>)."
+   }
+  },
+  "step_kinds": {
+   "measured": {
+    "label": "Measured",
+    "explain": "Something read or measured from the drawing or the BoC."
+   },
+   "rule": {
+    "label": "Rule",
+    "explain": "A deterministic rule or exclusion."
+   },
+   "ai": {
+    "label": "AI",
+    "explain": "A vision-model request."
+   },
+   "score": {
+    "label": "Score",
+    "explain": "The confidence arithmetic."
+   }
+  },
+  "stages": {
+   "parse_boc": {
+    "label": "Reading the BoC",
+    "explain": "Parse and validate the Bill of Characteristics."
+   },
+   "render": {
+    "label": "Rendering sheets",
+    "explain": "Turn each sheet into an image."
+   },
+   "ocr": {
+    "label": "Reading text",
+    "explain": "OCR, PDF text and frame detection on each sheet."
+   },
+   "match": {
+    "label": "Matching to BoC rows",
+    "explain": "Decide which text each row covers."
+   },
+   "exclusions": {
+    "label": "Applying exclusions",
+    "explain": "Hide sheet furniture and labels."
+   },
+   "rules": {
+    "label": "Classifying leftovers",
+    "explain": "Run rules R1-R11 on text no row covers."
+   },
+   "model_check": {
+    "label": "AI check",
+    "explain": "Ask the vision model about ambiguous leftovers."
+   },
+   "places": {
+    "label": "Checking repeated features",
+    "explain": "Compare nX callouts with the row's places."
+   },
+   "scoring": {
+    "label": "Scoring",
+    "explain": "Turn each candidate into a scored flag or drop it."
+   },
+   "transcription": {
+    "label": "Transcribing flags",
+    "explain": "AI transcription of flagged text, display only."
+   }
+  }
+ },
+ "flag_chain": {
+  "flag_id": "U-6",
+  "class": "unaccounted",
+  "sheet": 2,
+  "region_ids": [
+   "s2-o6",
+   "s2-o7"
+  ],
+  "group_id": "G32",
+  "confidence": "medium",
+  "score": 0.6,
+  "steps": [
+   {
+    "n": 1,
+    "kind": "measured",
+    "title": "Read the text",
+    "detail": "Read \".05 D B C 01D\" on sheet 2, zone C3, from 2 text pieces.",
+    "data": {
+     "regions": [
+      {
+       "region_id": "s2-o6",
+       "text": ".05/D/B/C",
+       "ocr_conf": 0.811,
+       "origin": "ocr",
+       "source_label": "OCR"
+      },
+      {
+       "region_id": "s2-o7",
+       "text": "01D",
+       "ocr_conf": 0.989,
+       "origin": "ocr",
+       "source_label": "OCR"
+      }
+     ]
+    }
+   },
+   {
+    "n": 2,
+    "kind": "measured",
+    "title": "Matched to a BoC row?",
+    "detail": "No. No BoC row is located on this sheet.",
+    "data": {
+     "candidates": [],
+     "nearest_row": null
+    }
+   },
+   {
+    "n": 3,
+    "kind": "rule",
+    "title": "Excluded?",
+    "detail": "No exclusion applies. Checked: Title block, Border and zone labels, Revision block, View labels (SECTION A-A, DETAIL B), Reference dimensions (in parentheses), Scale notes, Basic dimensions (boxed numbers).",
+    "data": {
+     "enabled": [
+      "title_block",
+      "border",
+      "revision_block",
+      "view_labels",
+      "reference_dims",
+      "scale_notes",
+      "basic_dims"
+     ],
+     "extra_regex": null,
+     "applied": null
+    }
+   },
+   {
+    "n": 4,
+    "kind": "rule",
+    "title": "R8: Ambiguous number",
+    "detail": "Contains numbers but matches no requirement pattern. Matched: \"4 digits\".",
+    "data": {
+     "rule_id": "R8",
+     "outcome": "ambiguous",
+     "group_id": "G32",
+     "group_text": ".05/D/B/C 01D",
+     "checks": [
+      {
+       "check": "R4_frame_grid",
+       "rule_id": "R4",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R1_tolerance",
+       "rule_id": "R1",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R4_frame_text",
+       "rule_id": "R4",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R2_limits",
+       "rule_id": "R2",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R6_spec",
+       "rule_id": "R6",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R5_note",
+       "rule_id": "R5",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R3_size",
+       "rule_id": "R3",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R7_finish",
+       "rule_id": "R7",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R11_short",
+       "rule_id": "R11",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R8_bare_number",
+       "rule_id": "R8",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R10_prose",
+       "rule_id": "R10",
+       "matched": false,
+       "status": "no_match",
+       "evidence": null
+      },
+      {
+       "check": "R8_has_digits",
+       "rule_id": "R8",
+       "matched": true,
+       "status": "fired",
+       "evidence": "4 digits"
+      },
+      {
+       "check": "R10_fallback",
+       "rule_id": "R10",
+       "matched": true,
+       "status": "matched_after",
+       "evidence": "last resort: always matches"
+      }
+     ]
+    }
+   },
+   {
+    "n": 5,
+    "kind": "ai",
+    "title": "AI investigator S1: Looked up nearby BoC rows",
+    "detail": "2 row(s) within 20 mm: CN 12 '1.250 ±.005' 2.8 mm right; CN 13 'Ø.281 ±.008' 17.3 mm above; 1 unlocated",
+    "data": {
+     "tool": "nearby_rows",
+     "args": {
+      "radius_mm": 20
+     },
+     "ref": "S1",
+     "ok": true,
+     "ms": 0,
+     "call_id": "L1",
+     "image_url": null
+    }
+   },
+   {
+    "n": 6,
+    "kind": "ai",
+    "title": "AI investigator S2: Zoomed in",
+    "detail": "3x zoom, small pad (204x123 px)",
+    "data": {
+     "tool": "zoom",
+     "args": {
+      "factor": 3,
+      "pad": "small"
+     },
+     "ref": "S2",
+     "ok": true,
+     "ms": 41,
+     "call_id": "L1",
+     "image_url": "../assets/drawing-crop.webp"
+    }
+   },
+   {
+    "n": 7,
+    "kind": "ai",
+    "title": "AI investigator S3: Read the text around it",
+    "detail": "1 text region(s) within 10 mm: 'A' 2.2 mm below",
+    "data": {
+     "tool": "ocr_context",
+     "args": {
+      "radius_mm": 10
+     },
+     "ref": "S3",
+     "ok": true,
+     "ms": 0,
+     "call_id": "L1",
+     "image_url": null
+    }
+   },
+   {
+    "n": 8,
+    "kind": "ai",
+    "title": "AI check: it is a requirement",
+    "detail": "anthropic claude-sonnet-5-5 answered with medium certainty: \"Bare size with no tolerance; the nearest row (CN 12) is a different feature.\" (read as \"1.250\").",
+    "data": {
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "status": "verdict",
+     "source": "investigator",
+     "call_id": "L1",
+     "crop_index": 0,
+     "verdict": {
+      "crop_index": 0,
+      "is_requirement": true,
+      "kind": "dimension",
+      "transcription": "1.250",
+      "reason": "Bare size with no tolerance; the nearest row (CN 12) is a different feature.",
+      "certainty": "medium"
+     },
+     "error": null,
+     "steps": [
+      {
+       "n": 1,
+       "ref": "S1",
+       "tool": "nearby_rows",
+       "args": {
+        "radius_mm": 20
+       },
+       "ok": true,
+       "ms": 0,
+       "result_summary": "2 row(s) within 20 mm: CN 12 '1.250 ±.005' 2.8 mm right; CN 13 'Ø.281 ±.008' 17.3 mm above; 1 unlocated"
+      },
+      {
+       "n": 2,
+       "ref": "S2",
+       "tool": "zoom",
+       "args": {
+        "factor": 3,
+        "pad": "small"
+       },
+       "ok": true,
+       "ms": 41,
+       "result_summary": "3x zoom, small pad (204x123 px)",
+       "image_ref": "S2",
+       "image_url": "../assets/drawing-crop.webp"
+      },
+      {
+       "n": 3,
+       "ref": "S3",
+       "tool": "ocr_context",
+       "args": {
+        "radius_mm": 10
+       },
+       "ok": true,
+       "ms": 0,
+       "result_summary": "1 text region(s) within 10 mm: 'A' 2.2 mm below"
+      },
+      {
+       "n": 4,
+       "ref": null,
+       "tool": "submit_verdict",
+       "args": {
+        "is_requirement": true,
+        "kind": "dimension",
+        "transcription": "1.250",
+        "reason": "Bare size with no tolerance; the nearest row (CN 12) is a different feature.",
+        "certainty": "medium",
+        "evidence": [
+         "S1",
+         "S2"
+        ]
+       },
+       "ok": true,
+       "ms": 0,
+       "result_summary": "requirement (dimension, medium): Bare size with no tolerance; the nearest row (CN 12) is a different feature."
+      }
+     ],
+     "evidence": [
+      "S1",
+      "S2"
+     ]
+    }
+   },
+   {
+    "n": 9,
+    "kind": "score",
+    "title": "Score 0.60: Medium confidence",
+    "detail": "0.6 (rule) × 1.0 (location) × 1.0 (AI) = 0.600. Flags need 0.5; High is 0.8+, Medium 0.6+.",
+    "data": {
+     "base": 0.6,
+     "locate_factor": 1.0,
+     "locate_reason": "row locations from the BoC",
+     "nearest_char_no": null,
+     "llm_factor": 1.0,
+     "llm_reason": "AI certainty high",
+     "threshold": 0.5,
+     "product": 0.6,
+     "basis": "model judged",
+     "band": "medium",
+     "result": "flagged",
+     "flag_id": "U-6"
+    }
+   }
+  ]
+ },
+ "region_linked": {
+  "region_id": "s1-oFX",
+  "sheet": 1,
+  "bbox": {
+   "x": 0.13357,
+   "y": 0.5293,
+   "w": 0.15171,
+   "h": 0.12565
+  },
+  "poly": [
+   [
+    0.13357,
+    0.63607
+   ],
+   [
+    0.27671,
+    0.5293
+   ],
+   [
+    0.28528,
+    0.54883
+   ],
+   [
+    0.14214,
+    0.65495
+   ]
+  ],
+  "angle": -30.0,
+  "text": "2X L1 0.812 ±.020 V.56 ±.02",
+  "ocr_conf": 0.93,
+  "origin": "ocr",
+  "sources": [
+   "ocr"
+  ],
+  "fcf_cells": 0,
+  "coverage": {
+   "covered": false,
+   "covered_by": [],
+   "candidates": [
+    {
+     "char_no": "8",
+     "requirement": "⌖ Ø.015 C A B",
+     "row_bbox_source": "export",
+     "overlap": 0.394,
+     "center_in_zone": true,
+     "distance_pw": 0.04235,
+     "text_similarity": 20.7,
+     "text_blank": false,
+     "numbers_compatible": false,
+     "passed": false,
+     "passed_by": null,
+     "distance_mm": 11.8
+    },
+    {
+     "char_no": "9",
+     "requirement": "2X ⌴ Ø.812 ±.020",
+     "row_bbox_source": "export",
+     "overlap": 1.0,
+     "center_in_zone": true,
+     "distance_pw": 3e-05,
+     "text_similarity": 70.6,
+     "text_blank": false,
+     "numbers_compatible": true,
+     "passed": false,
+     "passed_by": null,
+     "distance_mm": 0.0
+    },
+    {
+     "char_no": "10",
+     "requirement": "↧ .56 ±.02",
+     "row_bbox_source": "export",
+     "overlap": 1.0,
+     "center_in_zone": true,
+     "distance_pw": 3e-05,
+     "text_similarity": 58.1,
+     "text_blank": false,
+     "numbers_compatible": true,
+     "passed": false,
+     "passed_by": null,
+     "distance_mm": 0.0
+    },
+    {
+     "char_no": "11",
+     "requirement": "⌖ Ø.025 Ⓜ C A B",
+     "row_bbox_source": "export",
+     "overlap": 0.681,
+     "center_in_zone": true,
+     "distance_pw": 0.01987,
+     "text_similarity": 26.7,
+     "text_blank": false,
+     "numbers_compatible": false,
+     "passed": false,
+     "passed_by": null,
+     "distance_mm": 5.6
+    }
+   ],
+   "rows_placed_here": [],
+   "nearest_row": {
+    "char_no": "9",
+    "requirement": "2X ⌴ Ø.812 ±.020",
+    "distance_mm": 0.0
+   }
+  },
+  "exclusion": {
+   "checked": true,
+   "applied": null,
+   "label": null,
+   "detail": null
+  },
+  "group_id": null,
+  "classification": null,
+  "model": {
+   "provider": "anthropic",
+   "model": "claude-sonnet-5-5",
+   "status": "verdict",
+   "source": "investigator",
+   "call_id": "L1",
+   "crop_index": 0,
+   "verdict": {
+    "crop_index": 0,
+    "is_requirement": true,
+    "kind": "dimension",
+    "transcription": "1.250",
+    "reason": "Same callout as CN 9 next to it; that row already states it.",
+    "certainty": "high",
+    "covered_by": [
+     "9"
+    ]
+   },
+   "error": null,
+   "steps": [
+    {
+     "n": 1,
+     "ref": "S1",
+     "tool": "nearby_rows",
+     "args": {
+      "radius_mm": 20
+     },
+     "ok": true,
+     "ms": 0,
+     "result_summary": "2 row(s) within 20 mm: CN 12 '1.250 ±.005' 2.8 mm right; CN 13 'Ø.281 ±.008' 17.3 mm above; 1 unlocated"
+    },
+    {
+     "n": 2,
+     "ref": "S2",
+     "tool": "zoom",
+     "args": {
+      "factor": 3,
+      "pad": "small"
+     },
+     "ok": true,
+     "ms": 41,
+     "result_summary": "3x zoom, small pad (204x123 px)",
+     "image_ref": "S2",
+     "image_url": "../assets/drawing-crop.webp"
+    },
+    {
+     "n": 3,
+     "ref": "S3",
+     "tool": "ocr_context",
+     "args": {
+      "radius_mm": 10
+     },
+     "ok": true,
+     "ms": 0,
+     "result_summary": "1 text region(s) within 10 mm: 'A' 2.2 mm below"
+    },
+    {
+     "n": 4,
+     "ref": null,
+     "tool": "submit_verdict",
+     "args": {
+      "is_requirement": true,
+      "kind": "dimension",
+      "transcription": "1.250",
+      "reason": "Bare size with no tolerance; the nearest row (CN 12) is a different feature.",
+      "certainty": "medium",
+      "evidence": [
+       "S1",
+       "S2"
+      ]
+     },
+     "ok": true,
+     "ms": 0,
+     "result_summary": "requirement (dimension, medium): Bare size with no tolerance; the nearest row (CN 12) is a different feature."
+    }
+   ],
+   "evidence": [
+    "S1",
+    "S2"
+   ],
+   "link": {
+    "claimed": [
+     "9"
+    ],
+    "ok": true,
+    "char_nos": [
+     "9"
+    ],
+    "note": null,
+    "checks": [
+     {
+      "char_no": "9",
+      "requirement": "2X ⌴ Ø.812 ±.020",
+      "sheet": 1,
+      "sheet_ok": true,
+      "numbers_compatible": true,
+      "text_score": 82.0,
+      "threshold": 70,
+      "ok": true,
+      "why": null
+     }
+    ]
+   }
+  },
+  "places": null,
+  "score": null,
+  "final": {
+   "outcome": "covered_by_investigator",
+   "label": "Linked by AI",
+   "flag_ids": [],
+   "char_no": "9"
+  }
+ },
+ "investigate_call": {
+  "call_id": "L1",
+  "job": "investigate",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5-5",
+  "system_prompt": "FIXTURE: the investigator system prompt is recorded here verbatim.",
+  "instruction": "FIXTURE: the intro message with the item text and rule reason.",
+  "user_content": [
+   {
+    "type": "image",
+    "crop_index": 0
+   },
+   {
+    "type": "text",
+    "text": "FIXTURE intro"
+   }
+  ],
+  "request": {
+   "max_steps": 4,
+   "max_tokens_per_turn": 4000,
+   "tools": [
+    "zoom",
+    "nearby_rows",
+    "ocr_context",
+    "search_boc",
+    "submit_verdict"
+   ]
+  },
+  "raw_response_text": null,
+  "parsed": {
+   "crop_index": 0,
+   "is_requirement": true,
+   "kind": "dimension",
+   "transcription": "1.250",
+   "reason": "Bare size with no tolerance; the nearest row (CN 12) is a different feature.",
+   "certainty": "medium"
+  },
+  "input_tokens": 6120,
+  "output_tokens": 412,
+  "latency_ms": 5310,
+  "cost_usd": 0.0246,
+  "stop_reason": "tool_use",
+  "error": null,
+  "error_detail": null,
+  "steps": [
+   {
+    "n": 1,
+    "ref": "S1",
+    "tool": "nearby_rows",
+    "args": {
+     "radius_mm": 20
+    },
+    "ok": true,
+    "ms": 0,
+    "result_summary": "2 row(s) within 20 mm: CN 12 '1.250 ±.005' 2.8 mm right; CN 13 'Ø.281 ±.008' 17.3 mm above; 1 unlocated"
+   },
+   {
+    "n": 2,
+    "ref": "S2",
+    "tool": "zoom",
+    "args": {
+     "factor": 3,
+     "pad": "small"
+    },
+    "ok": true,
+    "ms": 41,
+    "result_summary": "3x zoom, small pad (204x123 px)",
+    "image_ref": "S2",
+    "image_url": "../assets/drawing-crop.webp"
+   },
+   {
+    "n": 3,
+    "ref": "S3",
+    "tool": "ocr_context",
+    "args": {
+     "radius_mm": 10
+    },
+    "ok": true,
+    "ms": 0,
+    "result_summary": "1 text region(s) within 10 mm: 'A' 2.2 mm below"
+   },
+   {
+    "n": 4,
+    "ref": null,
+    "tool": "submit_verdict",
+    "args": {
+     "is_requirement": true,
+     "kind": "dimension",
+     "transcription": "1.250",
+     "reason": "Bare size with no tolerance; the nearest row (CN 12) is a different feature.",
+     "certainty": "medium",
+     "evidence": [
+      "S1",
+      "S2"
+     ]
+    },
+    "ok": true,
+    "ms": 0,
+    "result_summary": "requirement (dimension, medium): Bare size with no tolerance; the nearest row (CN 12) is a different feature."
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "final": false,
+    "forced": false,
+    "ms": 1800,
+    "input_tokens": 1500,
+    "output_tokens": 120,
+    "stop": "tool_use",
+    "tool_calls": [
+     "nearby_rows",
+     "zoom"
+    ],
+    "text": "FIXTURE: text the model wrote in request 1"
+   },
+   {
+    "n": 2,
+    "final": false,
+    "forced": false,
+    "ms": 1710,
+    "input_tokens": 2210,
+    "output_tokens": 140,
+    "stop": "tool_use",
+    "tool_calls": [
+     "ocr_context"
+    ],
+    "text": "FIXTURE: text the model wrote in request 2"
+   },
+   {
+    "n": 3,
+    "final": true,
+    "forced": false,
+    "ms": 1800,
+    "input_tokens": 2410,
+    "output_tokens": 152,
+    "stop": "tool_use",
+    "tool_calls": [
+     "submit_verdict"
+    ],
+    "text": "FIXTURE: text the model wrote in request 3"
+   }
+  ],
+  "evidence": [
+   "S1",
+   "S2"
+  ],
+  "raw_messages": [
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "FIXTURE: shape only, not a real transcript"
+     },
+     {
+      "type": "image",
+      "source": "[image crop]"
+     }
+    ]
+   }
+  ],
+  "crops": [
+   {
+    "index": 0,
+    "ref": "crop",
+    "url": "../assets/drawing-crop.webp"
+   },
+   {
+    "index": 1,
+    "ref": "S2",
+    "url": "../assets/drawing-crop.webp"
+   }
+  ]
+ }
+}

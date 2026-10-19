@@ -20,6 +20,7 @@ const SHORTCUTS = [
   ["J / K", "Next / previous flag"], ["C", "Confirm miss"], ["E", "Excluded by customer rule"], ["D", "Dismiss"],
   ["Ctrl+Z", "Undo last disposition"], ["F", "Fit sheet"], ["+ / -", "Zoom"], ["O", "Toggle Faded / Original"],
   ["1 / 2 / 3", "Go to sheet"], ["U / P / A", "Filter Unaccounted / Places / All"], ["B", "View the BoC"], ["Ctrl+E", "Export exceptions"],
+  ["I", "Inspect any text on the drawing"], ["R", "Run report"],
   ["Ctrl+Alt+= / -", "Interface size"], ["?", "Shortcut help"],
 ];
 const DISP_SHORT = { open: "Open", confirmed: "Confirmed miss", excluded: "Excluded", dismissed: "Dismissed" };
@@ -58,13 +59,24 @@ const state = {
   undo: [],
   exportPulsed: false,
   skipSheets: [],
+  // decision trace (docs/TRACE.md), loaded per run; all optional: runs without a trace still work
+  trace: null,           // GET /runs/{id}/trace summary, or { missing: "message" }
+  traceCatalog: null,
+  traceRegions: {},      // sheet -> region records (inspect mode)
+  regionsById: {},
+  dropped: [],           // region records the AI dropped (outcome dropped_by_model)
+  flagChains: {},        // flag_id -> steps
+  inspect: false,
+  inspectSel: null,
+  keyError: null,        // last key test failure, plain words
+  lastLlmError: null,    // the last run's model-check error code
 };
 
 async function api(path, opts = {}) {
   const res = await fetch(path, opts);
   const isJson = (res.headers.get("content-type") || "").includes("json");
   const body = isJson ? await res.json() : await res.text();
-  if (!res.ok) throw new Error((body && body.detail) || res.statusText);
+  if (!res.ok) { const err = new Error((body && body.detail) || res.statusText); err.status = res.status; throw err; }
   return body;
 }
 
@@ -78,9 +90,10 @@ function show(screen) {
   $("#tb-run-actions").hidden = !results;
   $("#btn-cancel").hidden = screen !== "processing";
   document.body.dataset.screen = screen;
-  if (!results) window.TallyBocView?.close();
+  if (!results) { window.TallyBocView?.close(); closeReport({ restoreFocus: false }); setInspect(false); }
+  if (screen === "load" && /^#run=/.test(location.hash)) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ } }
   closeHelpMenu();
-  const fname = state.files.drawing?.filename;
+  const fname = state.files.drawing?.filename || (results ? state.run?.drawing?.filename : null);
   $("#crumb").hidden = !(fname && screen !== "load");
   $("#crumb-file").textContent = fname || "";
   $("#pill-sim").hidden = !(results && state.run?.boc?.simulated);
@@ -128,23 +141,58 @@ function renderLoad() {
   $("#ack").hidden = !/nist_ftc/i.test(state.files.drawing?.filename || "");
   const on = Object.entries(state.exclusions).filter(([, v]) => v).map(([k]) => EXCLUSION_SUMMARY[k] || k);
   $("#excl-summary").textContent = (on.length ? on.join(", ") : "none") + (state.extraRegex ? `, text matching ${state.extraRegex}` : "");
-  renderModelLine();
+  renderByok();
   $("#banner-mismatch").hidden = true;
 }
 
-function renderModelLine() {
+// "Bring your own AI key" card on the start screen. Never shows the key: only provider, model and set / not set.
+const PROVIDER_NAMES = { anthropic: "Claude", openai: "GPT", google: "Gemini", gemini: "Gemini" };
+const LLM_MSG = { no_credential: "no API key is set", auth_failed: "the API key was rejected", permission_denied: "the key can't use this model", model_not_found: "the model was not found for this key", rate_limited: "the API rate limited the request", connection_failed: "the model API could not be reached", disabled: "it is turned off" };
+const llmWords = (code) => LLM_MSG[code] || (/^api_error_/.test(code || "") ? `the API returned an error (${code.slice(10)})` : code ? "something unexpected failed" : "");
+function renderByok() {
   const s = state.settings;
-  const el = $("#model-line");
+  const el = $("#byok");
+  if (!el) return;
   if (!s) { el.innerHTML = ""; return; }
-  if (!state.useLlm) {
-    el.innerHTML = `<span class="dot" style="background:var(--muted)"></span><span>Model check off. Ambiguous leftovers are flagged for review without it.</span>`;
-  } else if (s.credential_set) {
-    const prov = (s.providers || []).find((p) => p.id === s.provider);
-    el.innerHTML = `<span class="dot" style="background:var(--success)"></span><span>Model check on ambiguous leftovers: <span class="mono ink">${esc(s.model)}</span>${prov ? ` (${esc(prov.label)})` : ""}</span>`;
+  const prov = (s.providers || []).find((p) => p.id === s.provider);
+  const name = PROVIDER_NAMES[s.provider] || prov?.label || s.provider;
+  const err = state.keyError || (state.lastLlmError && !["disabled", "no_credential"].includes(state.lastLlmError)
+    ? `The last check could not use the AI: ${llmWords(state.lastLlmError)}. Ambiguous items were flagged for review without it.` : null);
+  const errHtml = err ? `<div class="byok-err" role="alert">${icon("alert")}<span>${esc(err)} <button type="button" class="link-btn" id="byok-fix">Fix key</button></span></div>` : "";
+  if (s.credential_set) {
+    const on = state.useLlm;
+    el.className = `byok on${on ? "" : " off"}`;
+    el.innerHTML = `
+      <span class="byok-ico" aria-hidden="true">${icon(on ? "sparkle" : "key")}</span>
+      <div class="byok-main">
+        <div class="byok-line"><span class="dot" aria-hidden="true"></span>${on
+          ? `<span><b>AI check on:</b> ${esc(name)} (<span class="mono">${esc(s.model)}</span>)</span>`
+          : `<span><b>AI check off for this run.</b> Your ${esc(name)} key is set.</span>`}
+          <button type="button" class="link-btn" id="byok-change">Change</button></div>
+        ${errHtml}
+      </div>
+      <div class="byok-act"><span class="byok-switch"><span id="byok-sw-l">Use the AI on ambiguous items</span><button type="button" class="switch" role="switch" id="byok-switch" aria-labelledby="byok-sw-l" aria-checked="${on}"></button></span></div>`;
+    $("#byok-change").onclick = () => openSettings({ focusKey: true });
+    $("#byok-switch").onclick = () => { state.useLlm = !state.useLlm; $("#use-llm").checked = state.useLlm; renderByok(); $("#byok-switch")?.focus(); };
   } else {
-    el.innerHTML = `<span class="dot" style="background:var(--amber)"></span><span>No API key. Ambiguous leftovers are flagged for review without a model check.</span><button class="link-btn" id="add-key">Add key</button>`;
-    $("#add-key").onclick = openSettings;
+    el.className = "byok";
+    el.innerHTML = `
+      <span class="byok-ico" aria-hidden="true">${icon("key")}</span>
+      <div class="byok-main">
+        <h2 class="byok-title">Optional: bring your own AI key</h2>
+        <p class="byok-text">Tallymark works without a key (rules decide every clear case). Add an Anthropic (Claude), OpenAI (GPT) or Google (Gemini) key to let a model check the ambiguous items. The key stays in this server's memory and is never saved.</p>
+        <div class="byok-provs" aria-label="Supported providers">
+          <span class="prov-pill"><i class="prov-dot" style="background:#D97757" aria-hidden="true"></i>Anthropic <small>Claude</small></span>
+          <span class="prov-pill"><i class="prov-dot" style="background:#10A37F" aria-hidden="true"></i>OpenAI <small>GPT</small></span>
+          <span class="prov-pill"><i class="prov-dot" style="background:#4285F4" aria-hidden="true"></i>Google <small>Gemini</small></span>
+        </div>
+        ${errHtml}
+      </div>
+      <div class="byok-act"><button type="button" class="btn btn-primary" id="byok-add">${icon("key")}<span>Add your API key</span></button></div>`;
+    $("#byok-add").onclick = () => openSettings({ focusKey: true });
   }
+  const fix = $("#byok-fix");
+  if (fix) fix.onclick = () => openSettings({ focusKey: true });
 }
 
 async function acceptFile(kind, file) {
@@ -322,7 +370,10 @@ async function loadResults() {
   const sheets = doc.sheets_checked || [1];
   state.sheet = flags[0]?.sheet || sheets[0];
   await loadCoverageAll();
+  state.lastLlmError = doc.stats?.llm_error || null;
+  await loadTrace();
   show("results");
+  try { history.replaceState(null, "", `#run=${encodeURIComponent(state.runId)}`); } catch (e) { /* ignore */ }
   $("#covered-search").value = "";
   renderTabs();
   setPanel("flags");
@@ -473,6 +524,7 @@ function visibleFlags() {
     if (state.filter === "u") return f.class === "unaccounted";
     if (state.filter === "p") return f.class === "places";
     if (state.filter === "open") return f.disposition === "open";
+    if (state.filter === "dropped") return false;
     return true;
   }).sort((a, b) => (a.disposition === "dismissed") - (b.disposition === "dismissed"));
 }
@@ -480,9 +532,12 @@ function visibleFlags() {
 function renderChips() {
   const c = counts();
   const chips = [["all", "All", c.total, "All flags (A)"], ["u", "", c.u, "Unaccounted: no BoC row (U)"], ["p", "", c.p, "Places short (P)"], ["open", "Open", c.open, "Not reviewed yet"]];
+  const nDropped = droppedGroups().length;
+  if (nDropped) chips.push(["dropped", "Dropped by AI", nDropped, "Items the AI judged not a requirement. Check them and restore any it got wrong."]);
+  else if (state.filter === "dropped") state.filter = "all";
   $("#chips").innerHTML = chips.map(([k, l, n, t]) => {
-    const lab = k === "u" ? `<i class="mini-u">U</i>No row` : k === "p" ? `<i class="mini-p">P</i>Places` : l;
-    return `<button class="chip ${state.filter === k ? "on" : ""}" data-f="${k}" aria-pressed="${state.filter === k}" title="${t}">${lab}<span class="n">${n}</span></button>`;
+    const lab = k === "u" ? `<i class="mini-u">U</i>No row` : k === "p" ? `<i class="mini-p">P</i>Places` : k === "dropped" ? `${icon("sparkle")}${l}` : l;
+    return `<button class="chip ${k === "dropped" ? "chip-ai" : ""} ${state.filter === k ? "on" : ""}" data-f="${k}" aria-pressed="${state.filter === k}" title="${t}">${lab}<span class="n">${n}</span></button>`;
   }).join("");
   $$("#chips .chip").forEach((b) => (b.onclick = () => { state.filter = b.dataset.f; renderChips(); renderList(); }));
 }
@@ -506,6 +561,7 @@ function statusPill(f) {
 }
 
 function renderList() {
+  if (state.filter === "dropped") { renderDroppedList(); return; }
   const list = visibleFlags();
   if (!state.flags.length) {
     $("#flag-list").innerHTML = `<div class="empty"><h3>Nothing left on the drawing</h3><p>Every requirement-like region is covered by a BoC row, after exclusions. Review your exclusions if this looks too clean.</p><button class="btn btn-sm" id="empty-excl">${icon("sliders")}View exclusions</button></div>`;
@@ -527,7 +583,7 @@ function renderList() {
         <div class="flag-title">${esc(f.title)}</div>
         <div class="flag-meta"><span class="fid">${f.flag_id}</span><span class="sep">·</span><span>Sheet ${f.sheet}</span><span class="sep">·</span><span>Zone ${f.zone}</span></div>
         ${txt ? `<div class="flag-text" title="Text read on the drawing">${esc(txt)}</div>` : ""}
-        <div class="flag-foot">${statusPill(f)}${f.disposition_note ? `<span class="flag-note">${esc(f.disposition_note)}</span>` : ""}</div>
+        <div class="flag-foot">${statusPill(f)}${f.origin === "restored_by_user" ? `<span class="pill-restored" title="You restored this from the items the AI dropped">${icon("undo")}Restored</span>` : ""}${f.disposition_note ? `<span class="flag-note">${esc(f.disposition_note)}</span>` : ""}</div>
       </div></div>`;
   }).join("");
   $$("#flag-list .flag-row").forEach((r) => {
@@ -545,13 +601,16 @@ async function loadCoverageAll() {
     if (state.coverage[n]) return;
     try { state.coverage[n] = await api(`/runs/${state.runId}/sheets/${n}/coverage.json`); } catch (e) { state.coverage[n] = { covered: [], excluded: [] }; }
   }));
-  state.coveredItems = sheets.flatMap((n) => (state.coverage[n].covered || []).map((r, i) => {
-    const rows = (r.char_nos || []).map((cn) => state.rows.find((x) => x.char_no === cn && x.sheet === n) || state.rows.find((x) => x.char_no === cn)).filter(Boolean);
-    return { id: `${n}-${i}`, sheet: n, poly: r.poly, bbox: r.bbox, text: r.text || "", char_nos: r.char_nos || [], rows };
-  }));
+  const rowsFor = (n, cns) => (cns || []).map((cn) => state.rows.find((x) => x.char_no === cn && x.sheet === n) || state.rows.find((x) => x.char_no === cn)).filter(Boolean);
+  state.coveredItems = sheets.flatMap((n) => [
+    ...(state.coverage[n].covered || []).map((r, i) => ({ id: `${n}-${i}`, sheet: n, poly: r.poly, bbox: r.bbox, text: r.text || "", char_nos: r.char_nos || [], rows: rowsFor(n, r.char_nos) })),
+    // linked by the AI investigator to an existing row (coverage.json "linked"): shown as covered, marked "AI-linked, check"
+    ...(state.coverage[n].linked || []).map((r, i) => ({ id: `${n}-ai${i}`, sheet: n, poly: r.poly, bbox: r.bbox, text: r.text || "", char_nos: (r.char_nos || []).map(String), rows: rowsFor(n, r.char_nos), ai: true, regionIds: r.region_ids || [] })),
+  ]);
 }
 
 function coveredTip(item) {
+  if (item.ai) return `AI-linked: the model linked this to ${item.char_nos.length ? `CN ${item.char_nos.join(", ")}` : "a BoC row"}. Check it.`;
   return item.rows.length ? `Covered by ${item.rows.map((x) => `CN ${x.char_no}: ${x.requirement}`).join("; ")}` : "Covered by a BoC row";
 }
 
@@ -587,9 +646,10 @@ function renderCoveredList() {
       const req = it.rows.map((r) => r.requirement).join(" | ") || it.text;
       const zone = it.rows[0]?.zone;
       const cns = it.char_nos.length ? it.char_nos.map((c) => `CN ${esc(c)}`).join(", ") : "CN ?";
-      return `<button class="cov-row ${state.coveredSel === it.id ? "selected" : ""}" data-cid="${it.id}" aria-pressed="${state.coveredSel === it.id}" title="Show on the drawing">
+      const aiTip = it.ai ? `The model linked this to ${it.char_nos.length ? `CN ${it.char_nos.join(", ")}` : "a BoC row"}. Check it.` : "Show on the drawing";
+      return `<button class="cov-row ${it.ai ? "ai-linked" : ""} ${state.coveredSel === it.id ? "selected" : ""}" data-cid="${it.id}" aria-pressed="${state.coveredSel === it.id}" title="${esc(aiTip)}">
         <span class="cov-cn">${cns}</span>
-        <span class="cov-body"><span class="cov-req">${esc(req)}</span>
+        <span class="cov-body">${it.ai ? `<span class="pill-ai">${icon("sparkle")}AI-linked</span>` : ""}<span class="cov-req">${esc(req)}</span>
           <span class="cov-meta">Sheet ${it.sheet}${zone ? ` · Zone ${esc(zone)}` : ""}</span>
           <span class="cov-ocr"><span class="ocr-k">OCR</span>${esc(it.text)}</span></span></button>`;
     }).join("")}</div>`;
@@ -643,6 +703,7 @@ async function setSheet(n, { fit = false } = {}) {
   if (fit) fitView(false);
   renderOverlay();
   updateViewLabels();
+  if (state.inspect) loadSheetRegions(n).then(() => { if (state.sheet === n) renderOverlay(); });
 }
 
 function updateViewLabels() {
@@ -745,7 +806,7 @@ function renderOverlay() {
   const showCov = state.showCovered;
   const covered = (state.faded || showCov) ? covItems.map((it) => {
     const sel = state.coveredSel === it.id;
-    return `<polygon class="covered-shape ${showCov ? "on" : ""} ${sel ? "selected" : ""}" data-cid="${it.id}" data-tip="${esc(coveredTip(it))}" points="${polyPoints(it.poly, W, H)}" vector-effect="non-scaling-stroke" stroke-width="${showCov ? 1.6 : 1}"/>`;
+    return `<polygon class="covered-shape ${it.ai ? "ai" : ""} ${showCov ? "on" : ""} ${sel ? "selected" : ""}" data-cid="${it.id}" data-tip="${esc(coveredTip(it))}" points="${polyPoints(it.poly, W, H)}" vector-effect="non-scaling-stroke" stroke-width="${showCov ? 1.6 : 1}"/>`;
   }).join("") : "";
   const shapes = flags.map((f) => {
     const color = flagColor(f);
@@ -765,7 +826,7 @@ function renderOverlay() {
     ? `<defs><clipPath id="lit-clip">${litPolys.map((p) => `<polygon points="${polyPoints(p, W, H)}"/>`).join("")}</clipPath></defs>
        <image href="/runs/${state.runId}/sheets/${state.sheet}.png" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none" clip-path="url(#lit-clip)"/>`
     : "";
-  svg.innerHTML = `<g>${veil}</g><g>${clip}</g><g>${covered}</g><g>${shapes}</g><g>${locShape}</g>`;
+  svg.innerHTML = `<g>${veil}</g><g>${clip}</g><g>${covered}</g><g>${shapes}</g><g>${locShape}</g><g>${inspectLayer(W, H)}</g>`;
   // grayscale the drawing only while faded, so lit flags keep their ink colour via the hole in the veil
   const img = $("#stage img.sheet-img");
   if (img) img.style.filter = state.faded ? "saturate(0.35)" : "none";
@@ -774,8 +835,8 @@ function renderOverlay() {
   const topLeft = (poly) => [Math.min(...poly.map((p) => p[0])), Math.min(...poly.map((p) => p[1]))];
   const covTags = showCov ? covItems.map((it) => {
     const [x, y] = topLeft(it.poly);
-    const label = it.char_nos.length ? `CN ${it.char_nos.join(",")}` : "CN";
-    return `<span class="tag cvtag ${state.coveredSel === it.id ? "on" : ""}" data-cid="${it.id}" style="left:${x * 100}%;top:calc(${y * 100}% - 15px);transform:${inv}">${esc(label)}</span>`;
+    const label = (it.char_nos.length ? `CN ${it.char_nos.join(",")}` : "CN") + (it.ai ? " · AI" : "");
+    return `<span class="tag cvtag ${it.ai ? "ai" : ""} ${state.coveredSel === it.id ? "on" : ""}" title="${esc(coveredTip(it))}" data-cid="${it.id}" style="left:${x * 100}%;top:calc(${y * 100}% - 15px);transform:${inv}">${esc(label)}</span>`;
   }).join("") : "";
   const flagTags = flags.map((f) => {
     const [x, y] = topLeft(f.poly);
@@ -790,6 +851,7 @@ function renderOverlay() {
   $$("#tags .tag[data-cid]").forEach((t) => (t.onclick = (e) => { e.stopPropagation(); selectCovered(t.dataset.cid, { fromCanvas: true }); }));
   $$("#overlay .flag-shape").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); if (!state.dragMoved) selectFlag(p.dataset.id); }));
   $$("#overlay .covered-shape.on").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); if (!state.dragMoved) selectCovered(p.dataset.cid, { fromCanvas: true }); }));
+  $$("#overlay .insp-shape").forEach((p) => (p.onclick = (e) => { e.stopPropagation(); if (!state.dragMoved) openInspect(p.dataset.rid); }));
   $("#tb-faded").setAttribute("aria-pressed", String(state.faded));
   $("#tb-original").setAttribute("aria-pressed", String(!state.faded));
   $("#tb-covered").setAttribute("aria-pressed", String(state.showCovered));
@@ -847,7 +909,7 @@ function wireViewport() {
     state.view.s = ns;
     applyView(false);
   }, { passive: false });
-  window.addEventListener("resize", () => { if (state.screen === "results") fitView(false); });
+  window.addEventListener("resize", () => { if (state.screen === "results") { fitView(false); positionInspect(); } });
 }
 
 /* ------------------------------------------------------------------ BoC viewer (boc-view.js) */
@@ -929,7 +991,7 @@ function renderDetail() {
     <div class="detail-head">
       <span class="flag-badge ${isP ? "p" : "u"}" aria-hidden="true">${isP ? "P" : "U"}</span>
       <div class="dh-titles"><div class="dh-title">${f.flag_id} · ${isP ? "Places shortfall" : "Unaccounted requirement"}</div><div class="dh-sub">Sheet ${f.sheet} · Zone ${f.zone}</div></div>
-      ${statusPill(f)}
+      ${statusPill(f)}${f.origin === "restored_by_user" ? `<span class="pill-restored">${icon("undo")}Restored by you</span>` : ""}
       <button class="btn btn-sm btn-quiet btn-square" id="detail-close" aria-label="Close detail (Esc)" title="Close (Esc)">${icon("x")}</button></div>
     <div class="detail-grid">
       <section class="dcol">
@@ -954,6 +1016,7 @@ function renderDetail() {
         ${f.disposition !== "open" ? `<div class="disp-note" style="--dc:${DISP_COLOR[f.disposition]}">${DISP_LABEL[f.disposition]}${f.disposition_note ? `: ${esc(f.disposition_note)}` : ""}</div>` : ""}
       </section>
     </div>
+    ${whySection(f)}
     <div class="actions" data-tour="decisions">
       <span class="actions-label">Your decision</span>
       <div class="decide" role="group" aria-label="Decision for ${f.flag_id}">
@@ -969,6 +1032,7 @@ function renderDetail() {
   $("#act-d").onclick = () => dispose("dismissed");
   $("#act-k").onclick = () => step(-1);
   $("#act-j").onclick = () => step(1);
+  wireWhy(f);
 }
 
 function step(dir) {
@@ -1098,7 +1162,8 @@ async function loadSettings() {
     for (const x of state.settings.exclusions) state.exclusions[x.key] = x.default;
   }
 }
-function openSettings() {
+function openSettings(opts = {}) {
+  if (opts instanceof Event) opts = {};
   const s = state.settings;
   $("#excl-toggles").innerHTML = s.exclusions.map((x) => `<div class="toggle-row"><span>${esc(x.label)}</span><button class="switch" role="switch" aria-label="${esc(x.label)}" aria-checked="${!!state.exclusions[x.key]}" data-k="${x.key}"></button></div>`).join("");
   $$("#excl-toggles .switch").forEach((b) => (b.onclick = () => {
@@ -1111,7 +1176,10 @@ function openSettings() {
   $("#use-llm").checked = state.useLlm;
   renderKeyStatus();
   $("#settings").hidden = false;
-  $(".drawer .switch")?.focus();
+  if (opts.focusKey) {
+    $("#byok-section").scrollIntoView({ block: "start" });
+    $("#api-key").focus({ preventScroll: true });
+  } else $(".drawer .switch")?.focus();
 }
 function renderProviderFields() {
   const s = state.settings;
@@ -1138,7 +1206,7 @@ async function saveSettings(body) {
   state.settings = await api("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   renderProviderFields();
   renderKeyStatus();
-  renderModelLine();
+  renderByok();
 }
 
 /* ------------------------------------------------------------------ help */
@@ -1158,6 +1226,8 @@ function openHelpMenu() {
   const tour = $("#menu-tour");
   tour.disabled = !onResults;
   $("#menu-tour-sub").textContent = onResults ? "A short walk through the results" : "Available once a check has run";
+  $("#menu-report").disabled = !onResults;
+  $("#menu-report-sub").textContent = onResults ? "Every step, rule and AI call of this run" : "Available once a check has run";
   $("#help-menu").hidden = false;
   $("#btn-help").setAttribute("aria-expanded", "true");
   (onResults ? tour : $("#menu-keys")).focus();
@@ -1173,6 +1243,7 @@ function wireHelpMenu() {
   $("#btn-help").onclick = (e) => { e.stopPropagation(); if ($("#help-menu").hidden) openHelpMenu(); else closeHelpMenu(); };
   $("#menu-tour").onclick = () => { closeHelpMenu(); startTour(); };
   $("#menu-keys").onclick = () => openHelpModal();
+  $("#menu-report").onclick = () => { closeHelpMenu(); openReport(); };
   $("#help-menu").addEventListener("keydown", (e) => {
     const items = $$("#help-menu [role=menuitem]:not(:disabled)");
     const i = items.indexOf(document.activeElement);
@@ -1216,6 +1287,10 @@ function wireTour() {
       text: (flagsText ? `${flagsText} ` : "") + "The <b>Covered</b> tab lists the text a BoC row already covers, read-only." },
     { key: "detail", before: prepTourFlag },
     { key: "decisions", before: prepTourFlag },
+    { key: "trace", title: "How was this decided?", before: prepTourFlag,
+      text: "Open this to see every step behind a flag: what was read, which BoC rows were compared, the rule that fired, any AI question with its exact answer, and the score. Each step says whether code or the AI decided it." },
+    { key: "report", title: "Run report",
+      text: "Everything this run did: where every piece of text ended up, each stage with its timing, every AI call verbatim, and the settings used. Download it as an audit trail. Press <b>I</b> on the drawing to inspect any text." },
     "export",
   ]);
   document.addEventListener("tallytour:end", () => {
@@ -1229,12 +1304,385 @@ function startTour() {
   window.TallyTour?.start?.({ force: true });
 }
 
+/* ------------------------------------------------------------------ decision trace (trace-view.js renders it) */
+// Everything here is progressive disclosure over /runs/{id}/trace*: hidden by default, one click away.
+// A run without a trace (older runs) keeps working; the views say so instead of failing.
+const TT = () => window.TallyTrace;
+const traceCtx = () => ({ runId: state.runId, catalog: state.traceCatalog, enabledExclusions: state.trace?.run?.settings?.exclusions || [] });
+const OUTCOME_HEX = {
+  covered: "#0E8C7F", covered_by_investigator: "#0E8C7F", excluded: "#6B7785", not_requirement: "#8A94A3",
+  dropped_by_model: "#8A3FBF", below_threshold: "#B7791F", merged: "#8A94A3", flagged_unaccounted: "#C8372D", flagged_places: "#B7791F",
+};
+const INSPECT_KEYS = [["flagged_unaccounted", "Flagged"], ["covered", "Covered"], ["excluded", "Excluded"], ["not_requirement", "Not a requirement"], ["dropped_by_model", "Dropped by AI"]];
+const WHY_KEY = "tallymark.why.open";
+const whyOpen = () => { try { return localStorage.getItem(WHY_KEY) === "1"; } catch (e) { return !!state.whyOpenMem; } };
+const setWhyOpen = (on) => { state.whyOpenMem = on; try { localStorage.setItem(WHY_KEY, on ? "1" : "0"); } catch (e) { /* page-only */ } };
+
+async function loadTrace() {
+  Object.assign(state, { trace: null, traceCatalog: null, traceRegions: {}, regionsById: {}, dropped: [], flagChains: {}, inspectSel: null, allRegionsLoaded: null });
+  try {
+    const [t, catalog] = await Promise.all([api(`/runs/${state.runId}/trace`), api(`/runs/${state.runId}/trace/catalog`)]);
+    state.trace = t;
+    state.traceCatalog = catalog;
+  } catch (e) {
+    state.trace = { missing: e.status === 404 ? "This run has no decision trace (it ran before tracing was added, or its files expired)." : `The decision trace could not load: ${e.message}` };
+    return;
+  }
+  const oc = state.trace.outcomes || {};
+  const jobs = [];
+  if (oc.dropped_by_model?.count) jobs.push(api(`/runs/${state.runId}/trace/regions?outcome=dropped_by_model&limit=1000`).then((r) => { state.dropped = r.items; r.items.forEach(remember); }));
+  if (oc.covered_by_investigator?.count) jobs.push(api(`/runs/${state.runId}/trace/regions?outcome=covered_by_investigator&limit=1000`).then((r) => { r.items.forEach(remember); markAiLinked(r.items); }));
+  await Promise.all(jobs.map((j) => j.catch(() => null)));
+}
+function remember(reg) { state.regionsById[reg.region_id] = reg; }
+
+// Regions the model linked to an existing row ("covered_by_investigator") get the AI-linked marker in the Covered views.
+function markAiLinked(regs) {
+  for (const reg of regs) {
+    if (state.coveredItems.some((it) => it.ai && (it.regionIds || []).includes(reg.region_id))) continue; // already listed from coverage.json
+    const cn = TT()?.linkedCN(reg);
+    const near = (it) => it.sheet === reg.sheet && Math.abs(it.bbox.x - reg.bbox.x) < 0.004 && Math.abs(it.bbox.y - reg.bbox.y) < 0.004;
+    let it = state.coveredItems.find(near);
+    if (!it) {
+      const rows = cn ? [state.rows.find((x) => x.char_no === cn && x.sheet === reg.sheet) || state.rows.find((x) => x.char_no === cn)].filter(Boolean) : [];
+      it = { id: `${reg.sheet}-ai-${reg.region_id}`, sheet: reg.sheet, poly: reg.poly, bbox: reg.bbox, text: reg.text || "", char_nos: cn ? [cn] : [], rows };
+      state.coveredItems.push(it);
+    }
+    it.ai = true;
+    it.regionId = reg.region_id;
+    if (cn && !it.char_nos.includes(cn)) it.char_nos = [cn, ...it.char_nos];
+  }
+}
+
+/* ---- "How was this decided?" (flag detail) */
+async function loadFlagChain(flagId) {
+  if (state.flagChains[flagId]) return state.flagChains[flagId];
+  if (state.trace?.missing) throw new Error(state.trace.missing);
+  const rec = await api(`/runs/${state.runId}/trace/flags/${encodeURIComponent(flagId)}`);
+  state.flagChains[flagId] = rec.steps || [];
+  return state.flagChains[flagId];
+}
+function whySection(f) {
+  const open = whyOpen();
+  const steps = state.flagChains[f.flag_id];
+  const usedAi = steps ? steps.some((s) => s.kind === "ai" && (s.data || {}).status !== "not_needed") : !!f.llm;
+  const kinds = ["measured", "rule", "ai", "score"].map((k) => `<span class="tv-k-${k}"><span class="tv-badge">${TT()?.KIND[k].label || k}</span></span>`).join("");
+  return `<section class="why" data-tour="trace" aria-label="How was this decided">
+    <button type="button" class="why-toggle" id="why-toggle" aria-expanded="${open}" aria-controls="why-body">${icon("route")}
+      <span class="why-t"><b>How was this decided?</b><span>Every step for ${esc(f.flag_id)}: what was read, matched, ruled${usedAi ? ", asked the AI" : ""} and scored.</span></span>
+      <span class="why-kinds" aria-hidden="true">${kinds}</span><svg class="i why-chev" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+    <div class="why-body" id="why-body" ${open ? "" : "hidden"}>${steps ? TT().stepsHTML(steps, traceCtx()) : `<p class="tv-muted">Loading the decision trace...</p>`}</div>
+  </section>`;
+}
+function wireWhy(f) {
+  const btn = $("#why-toggle");
+  if (!btn || !TT()) return;
+  const fill = () => {
+    if (state.flagChains[f.flag_id]) return;
+    loadFlagChain(f.flag_id).then((steps) => {
+      const body = $("#why-body");
+      if (body && state.selected === f.flag_id) body.innerHTML = TT().stepsHTML(steps, traceCtx());
+    }, (e) => { const body = $("#why-body"); if (body) body.innerHTML = `<p class="tv-empty">${esc(e.message)}</p>`; });
+  };
+  btn.onclick = () => {
+    const on = btn.getAttribute("aria-expanded") !== "true";
+    setWhyOpen(on);
+    btn.setAttribute("aria-expanded", String(on));
+    $("#why-body").hidden = !on;
+    if (on) fill();
+  };
+  if (whyOpen()) fill();
+}
+
+/* ---- Dropped by AI (Flags tab filter) + restore */
+function droppedGroups() {
+  const seen = new Map();
+  for (const r of state.dropped) {
+    const key = r.group_id || r.region_id;
+    if (!seen.has(key)) seen.set(key, r);
+  }
+  return [...seen.values()];
+}
+function renderDroppedList() {
+  const items = droppedGroups();
+  const el = $("#flag-list");
+  if (!items.length) { el.innerHTML = `<div class="empty"><p>The AI dropped nothing in this run.</p></div>`; return; }
+  el.innerHTML = `<p class="dropped-note">The AI judged these <b>not a requirement</b>, so they are not flags. They stay listed so you can check the model. Restore any it got wrong; the restored flag is yours to decide.</p>` +
+    items.map((r) => {
+      const m = r.model || {};
+      const v = m.verdict || {};
+      const restored = r.user?.restored_flag_id;
+      const text = r.classification?.text || r.text;
+      const crop = m.call_id != null && m.crop_index != null ? `<img class="dc-crop" loading="lazy" alt="The crop the AI was shown" src="/runs/${state.runId}/trace/llm/${encodeURIComponent(m.call_id)}/crops/${m.crop_index}.png">` : "";
+      return `<article class="dropped-card ${restored ? "restored" : ""}" data-rid="${esc(r.region_id)}">
+        <div class="dc-top"><div><div class="dc-text">${esc(text)}</div><div class="dc-meta">Sheet ${r.sheet} · ${esc(m.provider || "")} ${esc(m.model || "")}</div></div>
+          ${restored ? `<span class="pill-restored" style="margin-left:auto">${icon("undo")}Restored as ${esc(restored)}</span>` : ""}</div>
+        ${crop}
+        <div class="dc-why"><b>AI said:</b> &ldquo;${esc(v.reason || "not a requirement")}&rdquo; <span class="muted">(${esc(v.certainty || "?")} certainty)</span></div>
+        <div class="dc-actions">
+          <button type="button" class="btn btn-xs" data-act="show">${icon("inspect")}<span>Show and inspect</span></button>
+          ${restored ? `<button type="button" class="btn btn-xs" data-act="open" data-flag="${esc(restored)}">${icon("flag")}<span>Open ${esc(restored)}</span></button>`
+            : `<button type="button" class="btn btn-xs btn-restore" data-act="restore">${icon("undo")}<span>Restore as flag</span></button>`}
+        </div></article>`;
+    }).join("");
+  $$("#flag-list .dropped-card").forEach((card) => {
+    const rid = card.dataset.rid;
+    card.querySelector('[data-act="show"]').onclick = () => goToRegion(rid);
+    const r = card.querySelector('[data-act="restore"]');
+    if (r) r.onclick = () => restoreRegion(rid, r);
+    const o = card.querySelector('[data-act="open"]');
+    if (o) o.onclick = () => { state.filter = "all"; renderChips(); selectFlag(o.dataset.flag); };
+  });
+}
+async function restoreRegion(regionId, btn) {
+  if (btn) btn.disabled = true;
+  let flag;
+  try {
+    flag = await api(`/runs/${state.runId}/trace/regions/${encodeURIComponent(regionId)}/restore`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast(`Could not restore: ${e.message}`);
+    return;
+  }
+  state.flags = await api(`/runs/${state.runId}/flags`);
+  const reg = state.regionsById[regionId];
+  const gid = reg?.group_id;
+  for (const r of state.dropped) if (r.region_id === regionId || (gid && r.group_id === gid)) r.user = { restored_flag_id: flag.flag_id };
+  delete state.flagChains[flag.flag_id];
+  state.filter = "all";
+  renderTabs(); renderSummary(); renderThumbs(); renderChips();
+  if (!$("#inspect-panel").hidden && state.inspectSel) openInspect(state.inspectSel, { zoom: false });
+  await selectFlag(flag.flag_id);
+  toast(`Restored as ${flag.flag_id}. Decide on it like any other flag.`);
+}
+
+/* ---- Inspect mode: click any text region on the drawing */
+async function loadSheetRegions(n) {
+  if (state.traceRegions[n] || !state.trace || state.trace.missing) return state.traceRegions[n] || [];
+  const r = await api(`/runs/${state.runId}/trace/regions?sheet=${n}&limit=1000`).catch(() => ({ items: [] }));
+  state.traceRegions[n] = r.items;
+  r.items.forEach(remember);
+  return r.items;
+}
+function inspectLayer(W, H) {
+  if (!state.inspect) return "";
+  // largest first, so a small region inside a big one stays on top and clickable
+  const regs = [...(state.traceRegions[state.sheet] || [])].sort((a, b) => b.bbox.w * b.bbox.h - a.bbox.w * a.bbox.h);
+  return regs.map((r) => {
+    const o = r.final?.outcome;
+    const lab = state.traceCatalog?.outcomes?.[o]?.label || r.final?.label || o;
+    const tip = `${r.text || "(no text)"} · ${lab} · click to inspect`;
+    const poly = r.poly && r.poly.length ? r.poly : boxPoly(r.bbox);
+    return `<polygon class="insp-shape ${state.inspectSel === r.region_id ? "on" : ""}" data-rid="${esc(r.region_id)}" data-tip="${esc(tip)}" style="--c:${OUTCOME_HEX[o] || "#8A94A3"}"
+      points="${polyPoints(expandPoly(poly, 0.002), W, H)}" stroke-width="1.6" vector-effect="non-scaling-stroke"${o === "covered_by_investigator" ? ' stroke-dasharray="5 3"' : ""}/>`;
+  }).join("");
+}
+function renderInspectBar() {
+  const bar = $("#inspect-bar");
+  bar.hidden = !state.inspect;
+  if (!state.inspect) return;
+  if (state.trace?.missing) {
+    bar.innerHTML = `<span>${icon("alert")} ${esc(state.trace.missing)}</span><button type="button" class="btn btn-xs" id="ib-exit">Exit</button>`;
+  } else {
+    bar.innerHTML = `<span><b>Inspect:</b> click any text to see how it was decided.</span>` +
+      INSPECT_KEYS.map(([k, l]) => `<span class="ib-key"><i style="--c:${OUTCOME_HEX[k]}"></i>${l}</span>`).join("") +
+      `<button type="button" class="btn btn-xs" id="ib-exit" title="Exit inspect mode (Esc or I)">${icon("x")}<span>Exit</span></button>`;
+  }
+  $("#ib-exit").onclick = () => setInspect(false);
+}
+async function setInspect(on) {
+  if (on && state.screen !== "results") return;
+  state.inspect = !!on;
+  const b = $("#tb-inspect");
+  if (b) b.setAttribute("aria-pressed", String(state.inspect));
+  if (!state.inspect) { state.inspectSel = null; const p = $("#inspect-panel"); if (p) p.hidden = true; }
+  renderInspectBar();
+  if (state.screen !== "results") return;
+  renderOverlay();
+  if (state.inspect) { await loadSheetRegions(state.sheet); renderOverlay(); }
+}
+// The panel floats over the canvas, just under the toolbar and the inspect strip (local CSS px, so UI scale is fine).
+function positionInspect() {
+  const panel = $("#inspect-panel");
+  const bar = $("#inspect-bar");
+  if (!panel || panel.hidden) return;
+  panel.style.setProperty("--ip-top", `${$("#canvas-col .toolbar").offsetHeight + (bar.hidden ? 0 : bar.offsetHeight) + 10}px`);
+}
+function closeInspectPanel() {
+  $("#inspect-panel").hidden = true;
+  state.inspectSel = null;
+  renderOverlay();
+}
+async function openInspect(regionId, { zoom = false } = {}) {
+  const panel = $("#inspect-panel");
+  state.inspectSel = regionId;
+  if (!state.inspect) await setInspect(true);
+  renderOverlay();
+  panel.hidden = false;
+  positionInspect();
+  panel.innerHTML = `<div class="ip2-head"><div><div class="ip2-eyebrow">Inspect</div><div class="ip2-text">Loading...</div></div><button class="btn btn-sm btn-quiet btn-square" id="ip2-close" aria-label="Close (Esc)" title="Close (Esc)">${icon("x")}</button></div>`;
+  $("#ip2-close").onclick = closeInspectPanel;
+  let reg;
+  try { reg = await api(`/runs/${state.runId}/trace/regions/${encodeURIComponent(regionId)}`); } catch (e) {
+    panel.querySelector(".ip2-text").textContent = e.message;
+    return;
+  }
+  if (state.inspectSel !== regionId) return;
+  remember(reg);
+  if (zoom) requestAnimationFrame(() => zoomToBox(reg.bbox));
+  const T = TT();
+  const out = T.outcome(reg, traceCtx());
+  const fid = (reg.final?.flag_ids || [])[0];
+  let steps;
+  const flagged = /^flagged_/.test(reg.final?.outcome || "") && fid;
+  try { steps = flagged ? await loadFlagChain(fid) : T.regionSteps(reg, traceCtx()); } catch (e) { steps = T.regionSteps(reg, traceCtx()); }
+  if (state.inspectSel !== regionId) return;
+  const restored = reg.user?.restored_flag_id;
+  let actions = "";
+  if (flagged && state.flags.some((f) => f.flag_id === fid)) actions = `<button type="button" class="btn btn-xs" id="ip2-flag">${icon("flag")}<span>Open flag ${esc(fid)}</span></button>`;
+  else if (restored) actions = `<button type="button" class="btn btn-xs" id="ip2-flag" data-f="${esc(restored)}">${icon("flag")}<span>Open ${esc(restored)}</span></button>`;
+  else if (["dropped_by_model", "below_threshold"].includes(reg.final?.outcome)) actions = `<button type="button" class="btn btn-xs btn-restore" id="ip2-restore">${icon("undo")}<span>Restore as flag</span></button>`;
+  panel.innerHTML = `
+    <div class="ip2-head"><div><div class="ip2-eyebrow">Inspect · Sheet ${reg.sheet} · ${esc(reg.region_id)}</div><div class="ip2-text">${esc(reg.text || "(no text)")}</div></div>
+      <button class="btn btn-sm btn-quiet btn-square" id="ip2-close" aria-label="Close (Esc)" title="Close (Esc)">${icon("x")}</button></div>
+    <div class="ip2-body">
+      <div class="outcome-card tone-${out.tone}" role="status"><b>${esc(out.title)}</b>${out.sub ? `<span>${esc(out.sub)}</span>` : ""}${actions ? `<div class="ip2-actions">${actions}</div>` : ""}</div>
+      ${T.stepsHTML(steps, traceCtx())}
+    </div>`;
+  $("#ip2-close").onclick = closeInspectPanel;
+  const fb = $("#ip2-flag");
+  if (fb) fb.onclick = () => { state.filter = "all"; renderChips(); selectFlag(fb.dataset.f || fid); };
+  const rb = $("#ip2-restore");
+  if (rb) rb.onclick = () => restoreRegion(reg.region_id, rb);
+  $("#ip2-close").focus({ preventScroll: true });
+}
+// From a list (report funnel, dropped card): go to the region's sheet, zoom to it and open its record.
+async function goToRegion(regionId) {
+  const reg = state.regionsById[regionId] || await api(`/runs/${state.runId}/trace/regions/${encodeURIComponent(regionId)}`).catch(() => null);
+  if (!reg) return;
+  remember(reg);
+  if (reg.sheet !== state.sheet) await setSheet(reg.sheet);
+  state.selected = null;
+  renderDetail(); renderList();
+  await setInspect(true);
+  await openInspect(regionId);
+  requestAnimationFrame(() => zoomToBox(reg.bbox));
+}
+
+/* ---- Run report (full screen) */
+let reportOpener = null;
+async function loadAllRegions() {
+  if (state.allRegionsLoaded) return;
+  let offset = 0, total = 1;
+  while (offset < total) {
+    const r = await api(`/runs/${state.runId}/trace/regions?limit=1000&offset=${offset}`);
+    r.items.forEach(remember);
+    total = r.total; offset += r.items.length;
+    if (!r.items.length) break;
+  }
+  state.allRegionsLoaded = state.runId;
+}
+async function openReport() {
+  if (state.screen !== "results" || !state.runId) return;
+  closeOverlays();
+  reportOpener = document.activeElement;
+  const back = $("#report");
+  const inner = $("#report-inner");
+  $("#report-id").textContent = state.runId;
+  $("#report-audit").href = `/runs/${state.runId}/audit.json`;
+  back.hidden = false;
+  $("#report-close").focus();
+  if (!state.trace) await loadTrace();
+  const t = state.trace;
+  if (!t || t.missing) {
+    $("#report-audit").hidden = true;
+    inner.innerHTML = `<div class="tr-sec"><div class="tr-empty" style="margin:0">${icon("alert")}<div><b>No run report for this run.</b><p>${esc(t?.missing || "The trace is not available.")}</p></div></div></div>`;
+    return;
+  }
+  $("#report-audit").hidden = false;
+  const r = t.run || {};
+  const files = [r.inputs?.drawing?.filename, r.inputs?.boc?.filename].filter(Boolean).map(esc).join(" checked against ");
+  inner.innerHTML = `<p class="report-lead">${files ? `<b>${files}</b>. ` : ""}Started ${esc((r.started_at || "").replace("T", " ").slice(0, 19))} UTC, ${esc(r.status || "")}. This page shows everything the run read, measured and decided; nothing here changes a result.</p>` +
+    TT().reportHTML(t, traceCtx());
+  if (state.allRegionsLoaded !== state.runId) state.allRegionsLoaded = null;
+}
+function closeReport({ restoreFocus = true } = {}) {
+  const back = $("#report");
+  if (!back || back.hidden) return false;
+  back.hidden = true;
+  const target = reportOpener && document.contains(reportOpener) && reportOpener !== document.body && !reportOpener.closest("#report") ? reportOpener : $("#btn-report");
+  if (restoreFocus) target?.focus();
+  else if (back.contains(document.activeElement)) document.activeElement.blur();
+  reportOpener = null;
+  return true;
+}
+function wireReport() {
+  const inner = $("#report-inner");
+  TT()?.wire(inner, traceCtx);
+  inner.addEventListener("click", async (e) => {
+    const fn = e.target.closest(".tr-fn-btn");
+    if (fn) {
+      const list = fn.parentElement.querySelector(".tr-fn-list");
+      const open = fn.getAttribute("aria-expanded") !== "true";
+      fn.setAttribute("aria-expanded", String(open));
+      list.hidden = !open;
+      if (open && !list.dataset.loaded) {
+        list.innerHTML = `<p class="tv-muted">Loading...</p>`;
+        try { await loadAllRegions(); } catch (err) { list.innerHTML = `<p class="tv-err">${esc(err.message)}</p>`; return; }
+        const step = (state.trace.funnel || []).find((s) => s.key === fn.dataset.fn);
+        const ids = step?.region_ids || state.trace.outcomes?.[fn.dataset.fn]?.region_ids ||
+          Object.values(state.regionsById).filter((x) => x.final?.outcome === fn.dataset.fn).map((x) => x.region_id);
+        list.dataset.loaded = "1";
+        list.innerHTML = TT().regionListHTML(ids || [], { regionsById: state.regionsById });
+      }
+      return;
+    }
+    const item = e.target.closest(".tr-item");
+    if (item) { closeReport({ restoreFocus: false }); goToRegion(item.dataset.region); }
+  });
+  $("#report-close").onclick = () => closeReport();
+  $("#report-copy").onclick = () => TT().copyText(state.runId).then(() => toast(`Copied the run id ${state.runId}.`));
+  // keep keyboard focus inside the full-screen report
+  $("#report").addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const f = $$("#report a[href], #report button:not(:disabled), #report summary, #report [tabindex='0']").filter((x) => x.offsetParent !== null);
+    if (!f.length) return;
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+}
+function wireTrace() {
+  if (!TT()) { ["#btn-report", "#tb-inspect", "#menu-report"].forEach((s) => { const el = $(s); if (el) el.hidden = true; }); return; }
+  TT().wire($("#detail"), traceCtx);
+  TT().wire($("#inspect-panel"), traceCtx);
+  wireReport();
+}
+
+// /#run=<id> reopens a finished run (the address is set when results show, so a reload keeps the run).
+async function openRunFromHash(hash) {
+  const m = /^#run=([\w.-]+)$/.exec(hash || "");
+  if (!m) return;
+  try {
+    const doc = await api(`/runs/${decodeURIComponent(m[1])}`);
+    if (!isFinished(doc.status)) return;
+    state.runId = doc.run_id;
+    await loadResults();
+  } catch (e) {
+    toast(e.status === 404 ? "That run is no longer on the server." : `Could not open the run: ${e.message}`);
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (err) { /* ignore */ }
+  }
+}
+
 /* ------------------------------------------------------------------ keyboard */
 function onKey(e) {
   if (window.TallyBocView?.isOpen?.() || window.TallyTour?.isOpen?.()) return; // both modules handle their own keys
   const typing = e.target.closest?.("input, textarea, select");
+  if (!$("#report").hidden) { if (e.key === "Escape") { e.preventDefault(); closeReport(); } return; }
   if (e.key === "Escape") {
-    if (!closeOverlays() && state.screen === "results") {
+    if (closeOverlays()) return;
+    if (state.screen === "results" && !$("#inspect-panel").hidden) { closeInspectPanel(); return; }
+    if (state.screen === "results" && state.inspect) { setInspect(false); return; }
+    if (state.screen === "results") {
       if (state.selected) clearSelection({ refit: false });
       else if (state.locate) { state.locate = null; state.coveredSel = null; renderOverlay(); if (state.panel === "covered") renderCoveredList(); }
     }
@@ -1264,6 +1712,8 @@ function onKey(e) {
   else if (k === "o") { state.faded = !state.faded; renderOverlay(); }
   else if (k === "v") setShowCovered(!state.showCovered);
   else if (k === "b") { e.preventDefault(); openBoc(); }
+  else if (k === "i") { e.preventDefault(); setInspect(!state.inspect); }
+  else if (k === "r") { e.preventDefault(); openReport(); }
   else if (/^[1-9]$/.test(k) && sheets.includes(+k)) setSheet(+k, { fit: true });
   else if (k === "u") filterTo("u");
   else if (k === "p") filterTo("p");
@@ -1444,6 +1894,7 @@ function wireLayout() {
 
 /* ------------------------------------------------------------------ boot */
 async function boot() {
+  const startHash = location.hash; // show("load") below clears a #run= link, so read it first
   wireDropCard("drawing");
   wireDropCard("boc");
   wireViewport();
@@ -1461,6 +1912,9 @@ async function boot() {
   $("#help").onclick = () => ($("#help").hidden = true);
   $("#help-tour").onclick = (e) => { e.stopPropagation(); $("#help").hidden = true; startTour(); };
   $("#btn-boc").onclick = () => openBoc();
+  $("#btn-report").onclick = () => openReport();
+  $("#tb-inspect").onclick = () => setInspect(!state.inspect);
+  wireTrace();
   $("#tb-covered").onclick = () => setShowCovered(!state.showCovered);
   $("#tab-flags").onclick = () => setPanel("flags");
   $("#tab-covered").onclick = () => setPanel("covered");
@@ -1495,12 +1949,14 @@ async function boot() {
   $("#settings").onclick = (e) => { if (e.target.id === "settings") closeOverlays(); };
   $("#export-modal").onclick = (e) => { if (e.target.id === "export-modal") closeOverlays(); };
   $("#excl-regex").oninput = (e) => { state.extraRegex = e.target.value.trim(); renderLoad(); };
-  $("#use-llm").onchange = (e) => { state.useLlm = e.target.checked; renderModelLine(); };
+  $("#use-llm").onchange = (e) => { state.useLlm = e.target.checked; renderByok(); };
   $("#provider-select").onchange = (e) => saveSettings({ provider: e.target.value });
   $("#model-select").onchange = (e) => saveSettings({ model: e.target.value });
   $("#key-save").onclick = async () => {
     const v = $("#api-key").value.trim();
     if (!v) return renderKeyStatus("Paste a key first.", false);
+    state.keyError = null;
+    state.lastLlmError = null;
     await saveSettings({ credential: v });
     $("#api-key").value = "";
   };
@@ -1509,6 +1965,9 @@ async function boot() {
     renderKeyStatus("Testing...", true);
     const r = await api("/settings/test", { method: "POST" });
     renderKeyStatus(r.message, r.ok);
+    state.keyError = r.ok ? null : `The key test failed: ${r.message}`;
+    if (r.ok) state.lastLlmError = null;
+    renderByok();
   };
   document.addEventListener("keydown", onKey);
   wireLayout();
@@ -1517,6 +1976,7 @@ async function boot() {
   await loadSettings();
   show("load");
   renderLoad();
+  await openRunFromHash(startHash);
 }
 
 boot();

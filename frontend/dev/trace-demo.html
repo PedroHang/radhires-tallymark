@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace views harness</title>
+<script>
+  /* ?theme=dark|light, default light (same attribute the app uses). */
+  (function () {
+    var t = new URLSearchParams(location.search).get("theme");
+    document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+  })();
+</script>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../app.css">
+<link rel="stylesheet" href="../trace-view.css">
+<style>
+  body { height: auto; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; display: flex; flex-direction: column; gap: 18px; }
+  .demo-note { margin: 0; padding: 10px 14px; border: 1px dashed var(--amber); border-radius: 10px; background: var(--amber-tint); color: var(--amber-ink); font-size: 14px; }
+  .demo-card { padding: 16px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
+  .demo-card h2 { margin: 0 0 10px; font-size: 17px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 style="margin:0;font-size:22px">Decision-trace views: investigator fixture</h1>
+  <p class="demo-note">Fixture data (<span class="mono">trace-fixture.json</span>): the shapes follow docs/TRACE.md and docs/INVESTIGATOR.md, the values are invented and no model was called. Use it to check how investigator tool steps and AI-linked items render before real runs produce them.</p>
+  <section class="demo-card"><h2>Flag chain with an investigator AI step</h2><div id="chain"></div></section>
+  <section class="demo-card"><h2>A region the model linked to an existing row (covered_by_investigator)</h2><div id="linked"></div></section>
+  <section class="demo-card"><h2>The investigate call record (/trace/llm/L1)</h2><div id="call"></div></section>
+</main>
+<script src="../trace-view.js"></script>
+<script>
+  (async function () {
+    // the icon sprite lives in index.html: borrow it so this page needs no copy
+    try {
+      var html = await (await fetch("../index.html")).text();
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var sprite = doc.querySelector("body > svg");
+      if (sprite) document.body.prepend(document.importNode(sprite, true));
+    } catch (e) { /* icons are decorative */ }
+    var fx = await (await fetch("trace-fixture.json")).json();
+    var T = window.TallyTrace;
+    var ctx = { runId: null, catalog: fx.catalog };
+    document.getElementById("chain").innerHTML = T.stepsHTML(fx.flag_chain.steps, ctx);
+    var o = T.outcome(fx.region_linked, ctx);
+    document.getElementById("linked").innerHTML =
+      '<div class="outcome-card tone-' + o.tone + '"><b>' + T.esc(o.title) + "</b><span>" + T.esc(o.sub) + "</span></div>" +
+      T.stepsHTML(T.regionSteps(fx.region_linked, ctx), ctx);
+    document.getElementById("call").innerHTML = T.callHTML(fx.investigate_call, ctx);
+    T.wire(document.querySelector("main"), ctx);
+  })();
+</script>
+</body>
+</html>

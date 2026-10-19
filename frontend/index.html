@@ -13,11 +13,12 @@
   })();
 </script>
 <script>(function(){var s=100;try{s=parseInt(localStorage.getItem("tallymark.uiScale"),10)||100}catch(e){}if([85,90,100,110,120,130].indexOf(s)<0)s=100;var d=document.documentElement;d.style.setProperty("--tally-ui-zoom",String(s/100));if(s!==100)d.style.zoom=String(s/100);d.setAttribute("data-ui-scale",String(s));})();</script>
-<link rel="stylesheet" href="app.css?v=6">
-<link rel="stylesheet" href="layout-tools.css?v=6">
-<link rel="stylesheet" href="boc-view.css?v=6">
-<link rel="stylesheet" href="tour.css?v=6">
-<link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=6">
+<link rel="stylesheet" href="app.css?v=7">
+<link rel="stylesheet" href="layout-tools.css?v=7">
+<link rel="stylesheet" href="boc-view.css?v=7">
+<link rel="stylesheet" href="tour.css?v=7">
+<link rel="stylesheet" href="trace-view.css?v=7">
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=7">
 </head>
 <body>
 <!-- Icon sprite: 24px grid, stroked with currentColor so every icon follows the theme. -->
@@ -55,6 +56,17 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.9 3.1 17.6A2 2 0 0 0 4.8 20.5h14.4a2 2 0 0 0 1.7-2.9L13.7 4.9a2 2 0 0 0-3.4 0z"/><path d="M12 9.8v4M12 17v.1"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4.5M5.5 4.5h11.5l-2.4 4 2.4 4H5.5"/></symbol>
+    <symbol id="i-ruler" viewBox="0 0 24 24"><rect x="2.8" y="8" width="18.4" height="8" rx="1.6" transform="rotate(-30 12 12)"/><path d="M7.6 10.5l1 1.7M10.6 8.8l1 1.7M13.6 7l1 1.7"/></symbol>
+    <symbol id="i-rule" viewBox="0 0 24 24"><path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h10"/><path d="M4 6.5l1.2 1.2L7.4 5.4M4 12l1.2 1.2 2.2-2.3"/><circle cx="5.5" cy="17.5" r="1.3"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1-5.1-1.9 5.1-1.9z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.2 16.5a8.5 8.5 0 1 1 15.6 0"/><path d="M12 13.5l4-4.5"/><circle cx="12" cy="14" r="1.4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/></symbol>
+    <symbol id="i-report" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M7.5 9h6M7.5 12.5h9M7.5 16h4"/></symbol>
+    <symbol id="i-inspect" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/><path d="M13 13l7.5 2.6-3 1.4-1.4 3z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1 19.5 3.5M16 7l2.5 2.5M14 9l1.8 1.8"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M6.5 9.5 12 15l5.5-5.5"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14.5 4.5 10 9 5.5"/><path d="M4.5 10H14a5.5 5.5 0 0 1 0 11h-3"/></symbol>
   </defs>
 </svg>
 
@@ -70,6 +82,7 @@
       <span class="pill-sim" id="pill-sim" hidden title="This BoC was prepared for the demo, not exported by an extraction tool"><span class="dot"></span><span class="hide-md">Simulated export</span><span class="show-md">Simulated</span></span>
       <div class="tb-group" id="tb-run-actions" hidden>
         <button class="btn btn-sm" id="btn-boc" title="View the Bill of Characteristics (B)"><svg class="i"><use href="#i-table"/></svg><span class="hide-md">View BoC</span></button>
+        <button class="btn btn-sm" id="btn-report" data-tour="report" title="Run report: everything that was run and decided (R)"><svg class="i"><use href="#i-report"/></svg><span class="hide-md">Run report</span></button>
         <button class="btn btn-sm" id="btn-rerun" title="Start a new check"><svg class="i"><use href="#i-refresh"/></svg><span class="hide-md">Rerun</span></button>
       </div>
       <button class="btn btn-sm btn-quiet" id="btn-cancel" hidden><svg class="i"><use href="#i-x"/></svg><span>Cancel</span></button>
@@ -81,6 +94,7 @@
         <button class="btn btn-sm btn-quiet btn-square" id="btn-help" aria-label="Help" title="Help" aria-haspopup="menu" aria-expanded="false" aria-controls="help-menu"><svg class="i"><use href="#i-help"/></svg></button>
         <div class="menu" id="help-menu" role="menu" aria-label="Help" hidden>
           <button type="button" role="menuitem" id="menu-tour"><svg class="i"><use href="#i-route"/></svg><span class="mi-t">Take the tour<small id="menu-tour-sub">A short walk through the results</small></span></button>
+          <button type="button" role="menuitem" id="menu-report"><svg class="i"><use href="#i-report"/></svg><span class="mi-t">Run report<small id="menu-report-sub">Every step, rule and AI call of this run</small></span></button>
           <button type="button" role="menuitem" id="menu-keys"><svg class="i"><use href="#i-keyboard"/></svg><span class="mi-t">Keyboard shortcuts</span><kbd>?</kbd></button>
         </div>
       </div>
@@ -136,11 +150,12 @@
         <span class="banner-actions"><button class="btn btn-sm" id="mismatch-continue">Continue</button><button class="btn btn-sm btn-quiet" id="mismatch-cancel">Cancel</button></span>
       </div>
 
+      <section class="byok" id="byok" aria-label="AI key"></section>
+
       <div class="excl-line">
         <div class="excl-summary"><span class="muted">Exclusions:</span> <span id="excl-summary"></span></div>
         <button class="btn btn-sm" id="btn-edit-excl"><svg class="i"><use href="#i-sliders"/></svg><span>Edit exclusions</span></button>
       </div>
-      <div class="model-line" id="model-line"></div>
 
       <div class="load-actions">
         <button class="btn btn-lg" id="btn-sample" title="Loads a public NIST test drawing (3 sheets) and a simulated BoC"><svg class="i"><use href="#i-sample"/></svg><span>Use sample drawing</span></button>
@@ -171,7 +186,7 @@
             <div class="pk-work">
               <div class="pk-canvas">
                 <div class="pk-stage">
-                  <img src="assets/peek-sheet1.webp?v=6" alt="" width="1100" height="850" draggable="false">
+                  <img src="assets/peek-sheet1.webp?v=7" alt="" width="1100" height="850" draggable="false">
                   <svg class="pk-over" viewBox="0 0 1000 773" preserveAspectRatio="none">
                     <defs>
                       <mask id="pk-veil-mask"><rect width="1000" height="773" fill="white"/><rect x="64" y="301" width="203" height="43" rx="4" fill="black"/><rect x="474" y="578" width="97" height="71" rx="4" fill="black"/></mask>
@@ -297,6 +312,7 @@
             <button id="tb-original" aria-pressed="false" title="Original: the untouched drawing sheet (O)"><svg class="i"><use href="#i-eye"/></svg><span>Original</span></button>
           </div>
           <button class="toggle-btn" id="tb-covered" aria-pressed="false" title="Outline every text region a BoC row covers (V)"><i class="sw-cov" aria-hidden="true"></i><span>Show covered</span></button>
+          <button class="toggle-btn tb-inspect" id="tb-inspect" aria-pressed="false" title="Inspect: click any text on the drawing to see how it was decided (I)"><svg class="i"><use href="#i-inspect"/></svg><span>Inspect</span><kbd>I</kbd></button>
           <div class="zoom-group" role="group" aria-label="Zoom">
             <button class="zg-btn" id="tb-out" title="Zoom out (-)" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
             <span class="zg-pct" id="tb-zoom" aria-live="polite">100%</span>
@@ -310,6 +326,7 @@
           </div>
           <span class="tb-page" id="tb-page"></span>
         </div>
+        <div class="inspect-bar" id="inspect-bar" role="status" hidden></div>
         <div class="viewport" id="viewport" data-ui-scale-exempt>
           <div class="stage" id="stage">
             <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -317,6 +334,7 @@
           </div>
           <div class="hover-tip" id="hover-tip" hidden></div>
         </div>
+        <aside class="inspect-panel" id="inspect-panel" aria-label="Inspect: how this text was decided" hidden></aside>
       </section>
       <aside class="flags-col" id="flags-col" data-tour="flags" aria-label="Flags">
         <div class="flags-head">
@@ -341,6 +359,20 @@
   </main>
 </div>
 
+<!-- Run report: full-screen view of the decision trace (trace-view.js renders it) -->
+<div class="report-back" id="report" role="dialog" aria-modal="true" aria-labelledby="report-title" hidden>
+  <div class="report-head">
+    <h2 id="report-title"><svg class="i"><use href="#i-report"/></svg>Run report</h2>
+    <span class="report-id" id="report-id"></span>
+    <div class="report-actions">
+      <a class="btn btn-sm" id="report-audit" download><svg class="i"><use href="#i-download"/></svg><span>Download audit trail (JSON)</span></a>
+      <button class="btn btn-sm" id="report-copy"><svg class="i"><use href="#i-copy"/></svg><span>Copy run id</span></button>
+      <button class="btn btn-sm btn-quiet btn-square" id="report-close" aria-label="Close the run report (Esc)" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+  </div>
+  <div class="report-body" id="report-body"><div class="report-inner" id="report-inner"></div></div>
+</div>
+
 <!-- overlays -->
 <div class="toast" id="toast" hidden><span id="toast-text"></span><button class="link-btn light" id="toast-undo">Undo</button></div>
 
@@ -350,7 +382,7 @@
   <p>The engineering drawing of the part, every sheet. It is the file the inspector measures against, at the same revision the BoC was built from.</p>
   <figure class="ip-fig ip-draw">
     <div class="ipd-frame">
-      <img src="assets/drawing-crop.webp?v=6" alt="Corner of an engineering drawing with dimension and tolerance callouts" width="640" height="619">
+      <img src="assets/drawing-crop.webp?v=7" alt="Corner of an engineering drawing with dimension and tolerance callouts" width="640" height="619">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <g class="ipd-b" style="--i:0"><circle cx="17.6" cy="11.6" r="3.4"/><text x="17.6" y="12.9">1</text></g>
         <g class="ipd-b" style="--i:1"><circle cx="22" cy="16" r="3.4"/><text x="22" y="17.3">2</text></g>
@@ -430,7 +462,7 @@
       </div>
       <p class="foot-note">Rules differ by customer. Exclusions only hide regions, they never delete BoC rows.</p>
 
-      <div class="drawer-section">Model check</div>
+      <div class="drawer-section" id="byok-section">Bring your own AI key</div>
       <p class="foot-note">Only ambiguous leftovers (a bare number with no tolerance or frame) are shown to the model, as a crop. Rules decide every other flag.</p>
       <div class="field">
         <label for="provider-select">Provider</label>
@@ -466,9 +498,10 @@
   </div>
 </div>
 
-<script src="layout-tools.js?v=6"></script>
-<script src="boc-view.js?v=6"></script>
-<script src="app.js?v=6"></script>
-<script src="tour.js?v=6"></script>
+<script src="layout-tools.js?v=7"></script>
+<script src="boc-view.js?v=7"></script>
+<script src="trace-view.js?v=7"></script>
+<script src="app.js?v=7"></script>
+<script src="tour.js?v=7"></script>
 </body>
 </html>

@@ -559,4 +559,6 @@ async def http_error(_, exc: HTTPException):
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
+from .restore import router as restore_router  # noqa: E402  (user override: restore a dropped item as a flag)
+app.include_router(restore_router)
 app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")
